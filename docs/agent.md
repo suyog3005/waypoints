@@ -11,7 +11,7 @@
 
 ---
 
-## 1. Purpose of This Repo
+## 1. Purpose of This Repo (main)
 
 An AI-powered railway block planning platform (Smart India Hackathon problem
 statement). Full context lives in:
