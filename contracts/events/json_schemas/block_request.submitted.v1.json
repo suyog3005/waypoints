@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "block_request.submitted.v1.json",
+  "title": "BlockRequestSubmitted",
+  "description": "A department submitted a new block request (technical or operational).",
+  "type": "object",
+  "required": ["event_id", "event_type", "event_version", "occurred_at", "payload"],
+  "properties": {
+    "event_id": { "type": "string", "format": "uuid" },
+    "event_type": { "const": "block_request.submitted" },
+    "event_version": { "type": "integer", "minimum": 1, "default": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "source": { "type": "string", "enum": ["internal", "external"], "default": "internal" },
+    "producer": { "type": ["string", "null"] },
+    "entity_type": { "const": "BLOCK_REQUEST" },
+    "entity_id": { "type": ["string", "null"], "format": "uuid" },
+    "correlation_id": { "type": ["string", "null"], "format": "uuid" },
+    "payload": { "$ref": "#/$defs/BlockRequestPayload" }
+  },
+  "$defs": {
+    "TechnicalRequestPayload": {
+      "type": "object",
+      "properties": {
+        "train_stops": { "type": ["string", "null"] },
+        "railway_line": { "type": ["string", "null"] },
+        "direction": { "type": ["string", "null"] },
+        "restriction_type": { "type": ["string", "null"] },
+        "train_type": { "type": ["string", "null"] },
+        "finance_reference": { "type": ["string", "null"] },
+        "responsible_department_id": { "type": ["string", "null"], "format": "uuid" },
+        "additional_parameters": { "type": ["object", "null"] }
+      }
+    },
+    "OperationalRequestPayload": {
+      "type": "object",
+      "required": ["reason"],
+      "properties": {
+        "reason": { "type": "string" },
+        "reason_details": { "type": ["string", "null"] },
+        "expected_duration_minutes": { "type": ["integer", "null"] },
+        "safety_notes": { "type": ["string", "null"] },
+        "additional_parameters": { "type": ["object", "null"] }
+      }
+    },
+    "BlockRequestPayload": {
+      "type": "object",
+      "required": [
+        "department_id",
+        "requested_by_user_id",
+        "request_type",
+        "track_id",
+        "requested_start",
+        "requested_end"
+      ],
+      "properties": {
+        "department_id": { "type": "string", "format": "uuid" },
+        "requested_by_user_id": { "type": "string", "format": "uuid" },
+        "request_type": { "type": "string", "enum": ["technical", "operational"] },
+        "priority": { "type": "string", "enum": ["normal", "high", "emergency"], "default": "normal" },
+        "track_id": { "type": "string", "format": "uuid" },
+        "requested_start": { "type": "string", "format": "date-time" },
+        "requested_end": { "type": "string", "format": "date-time" },
+        "is_emergency": { "type": "boolean", "default": false },
+        "affected_track_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+        "technical": { "oneOf": [{ "$ref": "#/$defs/TechnicalRequestPayload" }, { "type": "null" }] },
+        "operational": { "oneOf": [{ "$ref": "#/$defs/OperationalRequestPayload" }, { "type": "null" }] }
+      }
+    }
+  }
+}

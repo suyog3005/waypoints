@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "track.status_changed.v1.json",
+  "title": "TrackStatusChanged",
+  "description": "A track's availability/status changed (real-time operational event).",
+  "type": "object",
+  "required": ["event_id", "event_type", "event_version", "occurred_at", "payload"],
+  "properties": {
+    "event_id": { "type": "string", "format": "uuid" },
+    "event_type": { "const": "track.status_changed" },
+    "event_version": { "type": "integer", "minimum": 1, "default": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "source": { "type": "string", "enum": ["internal", "external"], "default": "internal" },
+    "producer": { "type": ["string", "null"] },
+    "entity_type": { "const": "TRACK" },
+    "entity_id": { "type": ["string", "null"], "format": "uuid" },
+    "correlation_id": { "type": ["string", "null"], "format": "uuid" },
+    "payload": {
+      "type": "object",
+      "required": ["track_id", "status"],
+      "properties": {
+        "track_id": { "type": "string", "format": "uuid" },
+        "status": { "type": "string" },
+        "reason": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

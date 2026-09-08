@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "optimization.requested.v1.json",
+  "title": "OptimizationRequested",
+  "description": "A request to run the optimizer, optionally scoped to a section/track.",
+  "type": "object",
+  "required": ["event_id", "event_type", "event_version", "occurred_at", "payload"],
+  "properties": {
+    "event_id": { "type": "string", "format": "uuid" },
+    "event_type": { "const": "optimization.requested" },
+    "event_version": { "type": "integer", "minimum": 1, "default": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "source": { "type": "string", "enum": ["internal", "external"], "default": "internal" },
+    "producer": { "type": ["string", "null"] },
+    "entity_type": { "type": ["string", "null"] },
+    "entity_id": { "type": ["string", "null"], "format": "uuid" },
+    "correlation_id": { "type": ["string", "null"], "format": "uuid" },
+    "payload": {
+      "type": "object",
+      "properties": {
+        "section_id": { "type": ["string", "null"], "format": "uuid" },
+        "track_id": { "type": ["string", "null"], "format": "uuid" },
+        "reason": { "type": "string", "default": "new_request" },
+        "include_request_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } }
+      }
+    }
+  }
+}

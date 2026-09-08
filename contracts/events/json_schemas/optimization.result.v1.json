@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "optimization.result.v1.json",
+  "title": "OptimizationResult",
+  "description": "The optimizer produced a plan; metrics describe its quality.",
+  "type": "object",
+  "required": ["event_id", "event_type", "event_version", "occurred_at", "payload"],
+  "properties": {
+    "event_id": { "type": "string", "format": "uuid" },
+    "event_type": { "const": "optimization.result" },
+    "event_version": { "type": "integer", "minimum": 1, "default": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "source": { "type": "string", "enum": ["internal", "external"], "default": "internal" },
+    "producer": { "type": ["string", "null"] },
+    "entity_type": { "const": "PLAN" },
+    "entity_id": { "type": ["string", "null"], "format": "uuid" },
+    "correlation_id": { "type": ["string", "null"], "format": "uuid" },
+    "payload": {
+      "type": "object",
+      "required": ["plan_id"],
+      "properties": {
+        "plan_id": { "type": "string", "format": "uuid" },
+        "total_block_duration_minutes": { "type": ["integer", "null"] },
+        "affected_trains_count": { "type": ["integer", "null"] },
+        "expected_delay_minutes": { "type": ["integer", "null"] },
+        "utilization_percent": { "type": ["number", "null"] },
+        "merged_requests_count": { "type": ["integer", "null"] },
+        "affected_tracks_count": { "type": ["integer", "null"] },
+        "objective_score": { "type": ["number", "null"] },
+        "metrics": { "type": ["object", "null"] }
+      }
+    }
+  }
+}

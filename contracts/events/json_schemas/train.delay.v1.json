@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "train.delay.v1.json",
+  "title": "TrainDelay",
+  "description": "A train became delayed (real-time operational event).",
+  "type": "object",
+  "required": ["event_id", "event_type", "event_version", "occurred_at", "payload"],
+  "properties": {
+    "event_id": { "type": "string", "format": "uuid" },
+    "event_type": { "const": "train.delay" },
+    "event_version": { "type": "integer", "minimum": 1, "default": 1 },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "source": { "type": "string", "enum": ["internal", "external"], "default": "internal" },
+    "producer": { "type": ["string", "null"] },
+    "entity_type": { "const": "TRAIN" },
+    "entity_id": { "type": ["string", "null"], "format": "uuid" },
+    "correlation_id": { "type": ["string", "null"], "format": "uuid" },
+    "payload": {
+      "type": "object",
+      "required": ["train_id", "delay_minutes"],
+      "properties": {
+        "train_id": { "type": "string", "format": "uuid" },
+        "track_id": { "type": ["string", "null"], "format": "uuid" },
+        "delay_minutes": { "type": "integer", "minimum": 0 },
+        "reason": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
