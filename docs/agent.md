@@ -401,6 +401,25 @@ when a phase's tasks are finished.
 
 - **Next Immediate Action** (10a.5): Wire map events → tile recalculation + polling coordinator (fetch visible tiles every 2s, merge into stores)
 
+### 2026-09-09 — Phase 10a.5 Complete (Map Events + Polling Loop)
+
+- **Phase 10a.5 Status**: ✅ COMPLETE
+  - **Polling Coordinator** (`frontend/lib/hooks/use-polling-coordinator.ts`):
+    - Reads viewport extent (map.store) + display time (time.store) reactively.
+    - Computes visible tile IDs via `getVisibleTiles()`, attaches cached versions from tile.store.
+    - Feeds tiles into `useTrainPositions` (2 s refetchInterval).
+    - On response: updates tile version cache (delta transfer) + syncs business clock from `meta.businessClock`.
+    - Returns `{ positions, isLoading, error, visibleTiles, displayTime }`.
+  - **MapContainer Wiring**:
+    - `useBaseGraph()` now supplies live base graph (falls back to mock while loading).
+    - `usePollingCoordinator()` drives train + block data.
+    - New effects push time-filtered positions into `trains` GeoJSON source and derived blocks into `blocks` source.
+    - `addTrainLayers` (circle, minzoom 12, red) + `addBlockLayers` (line, amber, opacity 0.5) added on map load.
+  - **Build Status**: ✅ 15 routes, 0 errors. Map page 288 kB, shared First Load JS 87.6 kB.
+  - **Note**: Train layer uses simple circles (clustering deferred to 10a.6). No popups yet. Restriction overlay not yet rendered (needs backend data).
+
+- **Next Immediate Action** (10a.6): Map layers polish — train clustering, popups, restriction overlay, label minZoom tuning
+
 ### 2026-09-09 — Phase 10a.1 Complete (Infrastructure Scaffolding)
 
 - **Phase 10a.1 Status**: ✅ COMPLETE

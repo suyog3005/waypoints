@@ -4,6 +4,10 @@ import { useEffect, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useMapStore } from '@/stores/map.store';
+import { useBaseGraph } from '@/lib/hooks/use-base-graph';
+import { usePollingCoordinator } from '@/lib/hooks/use-polling-coordinator';
+import { trainPositionsToGeoJSON, filterByTime } from './TrainLayer';
+import { deriveBlocks, blocksToGeoJSON } from './BlockLayer';
 import { TimeControls } from './TimeControls';
 import { MapSidebar } from './MapSidebar';
 
@@ -75,6 +79,14 @@ export function MapContainer({ baseGraph = MOCK_BASE_GRAPH }: MapContainerProps)
   const setExtent = useMapStore((s) => s.setExtent);
   const layersVisible = useMapStore((s) => s.layersVisible);
 
+  // ── Data hooks (Phase 10a.4 / 10a.5) ─────────────────────────────────
+  // Base graph: prefer live data, fall back to mock while loading/error.
+  const { data: liveBaseGraph } = useBaseGraph();
+  const graph = liveBaseGraph ?? baseGraph;
+
+  // Polling coordinator: computes visible tiles + polls train positions.
+  const { positions, isLoading: trainsLoading, displayTime } = usePollingCoordinator();
+
   // ── Init map (once) ──────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -110,8 +122,9 @@ export function MapContainer({ baseGraph = MOCK_BASE_GRAPH }: MapContainerProps)
 
     map.on('load', () => {
       loadedRef.current = true;
-      addBaseGraph(map, baseGraph);
-      // TODO 10a.6: addTrainLayers(map), addBlockLayers(map)
+      addBaseGraph(map, graph);
+      addTrainLayers(map);
+      addBlockLayers(map);
     });
 
     return () => {
@@ -126,8 +139,30 @@ export function MapContainer({ baseGraph = MOCK_BASE_GRAPH }: MapContainerProps)
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !loadedRef.current) return;
-    updateBaseGraph(map, baseGraph);
-  }, [baseGraph]);
+    updateBaseGraph(map, graph);
+  }, [graph]);
+
+  // ── Update train positions (Phase 10a.5) ─────────────────────────────
+  // Filter by display time, then push into the train GeoJSON source.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !loadedRef.current) return;
+    const active = filterByTime(positions, displayTime);
+    (map.getSource('trains') as maplibregl.GeoJSONSource | undefined)?.setData(
+      trainPositionsToGeoJSON(active),
+    );
+  }, [positions, displayTime]);
+
+  // ── Update block occupancy (derived from train positions) ────────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !loadedRef.current) return;
+    const active = filterByTime(positions, displayTime);
+    const blocks = deriveBlocks(active);
+    (map.getSource('blocks') as maplibregl.GeoJSONSource | undefined)?.setData(
+      blocksToGeoJSON(blocks),
+    );
+  }, [positions, displayTime]);
 
   // ── Layer visibility ─────────────────────────────────────────────────
   useEffect(() => {
@@ -251,5 +286,51 @@ function updateBaseGraph(map: maplibregl.Map, data: BaseGraphData) {
   (map.getSource('base-edges') as maplibregl.GeoJSONSource | undefined)?.setData({
     type: 'FeatureCollection',
     features: edgeFeatures(data.nodes, data.edges),
+  });
+}
+
+// ── Train layers ───────────────────────────────────────────────────────
+
+function addTrainLayers(map: maplibregl.Map) {
+  map.addSource('trains', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+
+  // Individual train points (shown at high zoom).
+  map.addLayer({
+    id: 'train-point',
+    type: 'circle',
+    source: 'trains',
+    minzoom: 12,
+    paint: {
+      'circle-color': '#dc2626',
+      'circle-radius': 5,
+      'circle-stroke-color': '#fff',
+      'circle-stroke-width': 1.5,
+    },
+  });
+}
+
+// ── Block layers ───────────────────────────────────────────────────────
+
+function addBlockLayers(map: maplibregl.Map) {
+  map.addSource('blocks', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+
+  map.addLayer({
+    id: 'block-segments',
+    type: 'line',
+    source: 'blocks',
+    layout: {
+      'line-cap': 'round',
+    },
+    paint: {
+      'line-color': '#f59e0b',
+      'line-width': 6,
+      'line-opacity': 0.5,
+    },
   });
 }

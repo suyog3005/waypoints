@@ -259,7 +259,7 @@ This is based on patterns proven in [RIVM INFRA](https://gitlab.local.hacon.de/t
 
 _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md](../PHASE_10A_IMPLEMENTATION.md)._
 
-**Status: PHASE 10a.4 COMPLETE** (API hooks + tile utilities)
+**Status: PHASE 10a.5 COMPLETE** (Map events + polling loop)
 
 - ✅ Phase 9C completion verified (all 7 tasks done)
 - ✅ Dependencies installed: maplibre-gl@5.24.0, zustand@4.5.7, dexie@4.4.2
@@ -270,8 +270,9 @@ _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md
 - ✅ Sidebar navigation updated with Map link
 - ✅ 5 core map components built (MapContainer, TrainLayer, BlockLayer, TimeControls, MapSidebar)
 - ✅ API hooks built (useBaseGraph, useTrainPositions) + tile-management + train-positioning utilities
-- ✅ Build verified: 15 routes, 0 errors (map page 287 kB with Maplibre GL)
-- 🔄 Next: 10a.5 (map events + polling coordinator)
+- ✅ Polling coordinator wired (usePollingCoordinator) + train/block layers render reactively
+- ✅ Build verified: 15 routes, 0 errors (map page 288 kB with Maplibre GL)
+- 🔄 Next: 10a.6 (map layers polish — clustering, popups, restriction overlay)
 
 **10a Frontend Tasks** (8–9 days)
 
@@ -305,11 +306,13 @@ _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md
    - [x] **`lib/train-positioning.ts`**: `filterPositionsByTime`, `deriveBlocksFromPositions`, `interpolatePosition`
    - [x] Hooks index updated with new exports
 
-5. **10a.5 Map Events & Polling** (1.5 days)
-   - Maplibre move/zoom event handlers → update viewport → trigger tile recalculation
-   - Implement polling coordinator: every 2 sec, compute visible tiles → fetch with versions → merge into store
-   - Handle cache hits (version unchanged) → skip tile in response
-   - Update train/block layers reactively from TanStack Query response
+5. **✓ 10a.5 Map Events & Polling** (1.5 days) — ✅ COMPLETE
+   - [x] Maplibre move/zoom event handlers → update viewport (map.store)
+   - [x] `usePollingCoordinator` hook: viewport + displayTime → visible tiles → POST /trainpositions (2s)
+   - [x] Tile version cache updated from response meta (delta transfer)
+   - [x] Business clock synced from response meta
+   - [x] Train + block GeoJSON sources updated reactively (filtered by displayTime)
+   - [x] Train layer (circle, minzoom 12) + block layer (line, amber) added to map
 
 6. **10a.6 Map Layers & Rendering** (1 day)
    - Base graph layer: render nodes as circles (#333, radius 3), edges as lines (#666, width 2)
