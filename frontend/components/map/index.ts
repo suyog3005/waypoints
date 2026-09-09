@@ -1,15 +1,17 @@
 /**
  * Map Component Exports
  *
- * Central location for importing map-related components
- * Files will be created in Phase 10a.3
+ * Central location for importing map-related components.
  */
 
-// Components (Phase 10a.3)
-// export { MapContainer } from './MapContainer';
-// export { TrainLayer } from './TrainLayer';
-// export { BlockLayer } from './BlockLayer';
-// export { TimeControls } from './TimeControls';
-// export { MapSidebar } from './MapSidebar';
+export { MapContainer, toLon, toLat } from './MapContainer';
+export type { BaseGraphNode, BaseGraphEdge, BaseGraphData } from './MapContainer';
 
-// TODO: Create component files in Phase 10a.3
+export { trainPositionsToGeoJSON, filterByTime, MOCK_TRAIN_POSITIONS } from './TrainLayer';
+export type { TrainPosition } from './TrainLayer';
+
+export { deriveBlocks, blocksToGeoJSON } from './BlockLayer';
+export type { BlockSegment } from './BlockLayer';
+
+export { TimeControls } from './TimeControls';
+export { MapSidebar } from './MapSidebar';

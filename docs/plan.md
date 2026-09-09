@@ -259,15 +259,18 @@ This is based on patterns proven in [RIVM INFRA](https://gitlab.local.hacon.de/t
 
 _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md](../PHASE_10A_IMPLEMENTATION.md)._
 
-**Status: PHASE 10a.1 COMPLETE** (Infrastructure scaffolding done)
+**Status: PHASE 10a.3 COMPLETE** (Core map components built)
 
 - ✅ Phase 9C completion verified (all 7 tasks done)
 - ✅ Dependencies installed: maplibre-gl@5.24.0, zustand@4.5.7, dexie@4.4.2
 - ✅ Directory structure created: /stores, /components/map, /app/infrastructure/map
-- ✅ Map page created: /app/infrastructure/map/page.tsx with placeholder UI
+- ✅ Map page created: /app/infrastructure/map/page.tsx
 - ✅ Zustand stores created: map.store.ts, tile.store.ts, time.store.ts with TS interfaces
-- ✅ Build verified: 15 routes, 0 errors, dev server running on :3001
-- 🔄 Next: 10a.2 (add localStorage persistence to stores)
+- ✅ localStorage persistence added (map + time stores)
+- ✅ Sidebar navigation updated with Map link
+- ✅ 5 core map components built (MapContainer, TrainLayer, BlockLayer, TimeControls, MapSidebar)
+- ✅ Build verified: 15 routes, 0 errors (map page 287 kB with Maplibre GL)
+- 🔄 Next: 10a.4 (API hooks + tile-management utilities)
 
 **10a Frontend Tasks** (8–9 days)
 
@@ -287,12 +290,12 @@ _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md
    - [x] Sidebar navigation updated with Map link (/infrastructure/map)
    - [x] Build verified: 15 routes, 0 errors
 
-3. **10a.3 Core Components** (2 days)
-   - **`MapContainer.tsx`**: Maplibre GL wrapper, renders nodes + edges from base graph, handles map events (zoom, pan, click)
-   - **`TrainLayer.tsx`**: Renders train position features on map (clustered on zoom-out, individual icons on zoom-in)
-   - **`BlockLayer.tsx`**: Renders block occupancy segments (derived from train positions)
-   - **`TimeControls.tsx`**: Slider (±10 to +50 min), date/time picker, reset-to-now button
-   - **`MapSidebar.tsx`**: Panel with train list, restriction list, filters (reuse Phase 9B components)
+3. **✓ 10a.3 Core Components** (2 days) — ✅ COMPLETE
+   - [x] **`MapContainer.tsx`**: Maplibre GL wrapper, renders nodes + edges from base graph, handles map events (zoom, pan, click)
+   - [x] **`TrainLayer.ts`**: Train position GeoJSON builders + time filtering (clustering wired in 10a.6)
+   - [x] **`BlockLayer.ts`**: Block occupancy segment derivation + GeoJSON builder
+   - [x] **`TimeControls.tsx`**: Slider (−10 to +50 min, 5 s step), display time, reset-to-now button
+   - [x] **`MapSidebar.tsx`**: Layer visibility toggles + train list (from useTrains)
 
 4. **10a.4 API Hooks & Utilities** (1.5 days)
    - **`hooks/useBaseGraph()`**: GET /basegraph, cache with staleTime=3600s (1 hour)

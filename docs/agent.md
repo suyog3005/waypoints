@@ -370,6 +370,22 @@ when a phase's tasks are finished.
 
 - **Next Immediate Action** (10a.3): Create 5 core map components (MapContainer, TrainLayer, BlockLayer, TimeControls, MapSidebar)
 
+### 2026-09-09 — Phase 10a.3 Complete (Core Map Components)
+
+- **Phase 10a.3 Status**: ✅ COMPLETE
+  - **5 Core Components Built** (`frontend/components/map/`):
+    - `MapContainer.tsx`: Maplibre GL wrapper. Initializes map with Cartesian style, renders base graph (nodes as circles, edges as lines, station labels), wires move/zoom events → map.store, applies layer visibility. Includes `toLon`/`toLat` coordinate helpers (1 deg ≈ 111 320 m) + mock base graph.
+    - `TrainLayer.ts`: `trainPositionsToGeoJSON()`, `filterByTime()`, `MOCK_TRAIN_POSITIONS`. Clustering wired in 10a.6.
+    - `BlockLayer.ts`: `deriveBlocks()` (2 000 m segment heuristic per train), `blocksToGeoJSON()`.
+    - `TimeControls.tsx`: Offset slider (−10 to +50 min, 5 s step), display time (date-fns), reset-to-now. Reads/writes time.store.
+    - `MapSidebar.tsx`: Layer visibility toggles (baseGraph/trains/blocks/labels) + train list from `useTrains({active_only:true})` using `TrainOut` fields (train_id, train_number, is_active, train_type, schedule_count).
+  - **Map Page Updated**: `app/infrastructure/map/page.tsx` now renders `<MapContainer />` (was inline placeholder).
+  - **index.ts Updated**: Re-exports all map components + types.
+  - **Build Status**: ✅ 15 routes, 0 errors. Map page = 287 kB (includes Maplibre GL), shared First Load JS 87.6 kB.
+  - **Note**: Train/block layers render data via GeoJSON builders but are not yet added as Maplibre layers (deferred to 10a.6). Base graph renders from mock data (real `useBaseGraph` in 10a.4).
+
+- **Next Immediate Action** (10a.4): Create API hooks (useBaseGraph, useTrainPositions) + utilities (tile-management.ts, train-positioning.ts)
+
 ### 2026-09-09 — Phase 10a.1 Complete (Infrastructure Scaffolding)
 
 - **Phase 10a.1 Status**: ✅ COMPLETE
