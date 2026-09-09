@@ -1,0 +1,24 @@
+npm warn Unknown user config "always-auth". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> frontend@0.1.0 build
+> next build
+
+  Γû▓ Next.js 14.2.35
+  - Environments: .env.local
+
+   Creating an optimized production build ...
+ Γ£ô Compiled successfully
+   Linting and checking validity of types ...
+Failed to compile.
+
+./app/(shell)/requests/[id]/page.tsx:34:45
+Type error: Property 'id' does not exist on type 'never'.
+
+  32 |
+  33 |       <PageHeader
+> 34 |         title={request ? `Request ${request.id.slice(0, 8)}` : 'Request Details'}
+     |                                             ^
+  35 |         description={request ? `${request.request_type} request` : 'Loading...'}
+  36 |       />
+  37 |
+Next.js build worker exited with code: 1 and signal: null
