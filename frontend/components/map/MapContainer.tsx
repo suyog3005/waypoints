@@ -95,6 +95,8 @@ export function MapContainer({ baseGraph = MOCK_BASE_GRAPH }: MapContainerProps)
       container: containerRef.current,
       style: {
         version: 8,
+        // Glyphs required for symbol (text) layers: station labels + cluster counts.
+        glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
         sources: {},
         layers: [
           { id: 'bg', type: 'background', paint: { 'background-color': '#f1f5f9' } },
@@ -125,6 +127,8 @@ export function MapContainer({ baseGraph = MOCK_BASE_GRAPH }: MapContainerProps)
       addBaseGraph(map, graph);
       addTrainLayers(map);
       addBlockLayers(map);
+      addRestrictionLayers(map);
+      wireMapInteractions(map);
     });
 
     return () => {
@@ -174,8 +178,10 @@ export function MapContainer({ baseGraph = MOCK_BASE_GRAPH }: MapContainerProps)
       ['base-nodes', layersVisible.baseGraph],
       ['base-labels', layersVisible.labels],
       ['train-cluster', layersVisible.trains],
+      ['train-cluster-count', layersVisible.trains],
       ['train-point', layersVisible.trains],
       ['block-segments', layersVisible.blocks],
+      ['restriction-segments', layersVisible.restrictions],
     ];
     for (const [id, show] of entries) {
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis(show));
@@ -289,25 +295,70 @@ function updateBaseGraph(map: maplibregl.Map, data: BaseGraphData) {
   });
 }
 
-// ── Train layers ───────────────────────────────────────────────────────
+// ── Train layers (clustered) ───────────────────────────────────────────
 
 function addTrainLayers(map: maplibregl.Map) {
   map.addSource('trains', {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: [] },
+    cluster: true,
+    clusterMaxZoom: 13,
+    clusterRadius: 45,
   });
 
-  // Individual train points (shown at high zoom).
+  // Cluster circles (zoomed out).
+  map.addLayer({
+    id: 'train-cluster',
+    type: 'circle',
+    source: 'trains',
+    filter: ['has', 'point_count'],
+    paint: {
+      'circle-color': [
+        'step',
+        ['get', 'point_count'],
+        '#fca5a5',
+        10, '#f87171',
+        25, '#ef4444',
+      ],
+      'circle-radius': [
+        'step',
+        ['get', 'point_count'],
+        14,
+        10, 18,
+        25, 24,
+      ],
+      'circle-stroke-color': '#fff',
+      'circle-stroke-width': 2,
+    },
+  });
+
+  // Cluster count labels.
+  map.addLayer({
+    id: 'train-cluster-count',
+    type: 'symbol',
+    source: 'trains',
+    filter: ['has', 'point_count'],
+    layout: {
+      'text-field': ['get', 'point_count_abbreviated'],
+      'text-size': 12,
+      'text-font': ['Open Sans Bold'],
+    },
+    paint: {
+      'text-color': '#fff',
+    },
+  });
+
+  // Individual train points (zoomed in, no cluster).
   map.addLayer({
     id: 'train-point',
     type: 'circle',
     source: 'trains',
-    minzoom: 12,
+    filter: ['!', ['has', 'point_count']],
     paint: {
       'circle-color': '#dc2626',
-      'circle-radius': 5,
+      'circle-radius': 6,
       'circle-stroke-color': '#fff',
-      'circle-stroke-width': 1.5,
+      'circle-stroke-width': 2,
     },
   });
 }
@@ -332,5 +383,96 @@ function addBlockLayers(map: maplibregl.Map) {
       'line-width': 6,
       'line-opacity': 0.5,
     },
+  });
+}
+
+// ── Restriction layers ─────────────────────────────────────────────────
+
+/**
+ * Add a restriction overlay layer. Restrictions are rendered as red
+ * dashed lines over the affected track segment. Data is supplied by the
+ * backend (Phase 10a.8) and pushed via the `restrictions` source.
+ */
+function addRestrictionLayers(map: maplibregl.Map) {
+  map.addSource('restrictions', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+
+  map.addLayer({
+    id: 'restriction-segments',
+    type: 'line',
+    source: 'restrictions',
+    layout: {
+      'line-cap': 'butt',
+    },
+    paint: {
+      'line-color': '#dc2626',
+      'line-width': 4,
+      'line-dasharray': [2, 1],
+      'line-opacity': 0.8,
+    },
+  });
+}
+
+// ── Map interactions (clicks, popups) ─────────────────────────────────
+
+/**
+ * Wire up click handlers:
+ * - Cluster click → zoom into the cluster.
+ * - Train point click → show a popup with train details + select in store.
+ */
+function wireMapInteractions(map: maplibregl.Map) {
+  let popup: maplibregl.Popup | null = null;
+
+  // Cluster click → zoom in.
+  map.on('click', 'train-cluster', (e) => {
+    const features = map.queryRenderedFeatures(e.point, { layers: ['train-cluster'] });
+    const clusterId = features[0]?.properties?.cluster_id;
+    if (clusterId == null) return;
+    const source = map.getSource('trains') as maplibregl.GeoJSONSource | undefined;
+    source?.getClusterExpansionZoom(clusterId).then((zoom) => {
+      if (zoom == null) return;
+      map.easeTo({
+        center: (features[0].geometry as GeoJSON.Point).coordinates as [number, number],
+        zoom: zoom + 0.5,
+      });
+    });
+  });
+
+  // Cursor pointer on hoverable layers.
+  for (const layer of ['train-cluster', 'train-point']) {
+    map.on('mouseenter', layer, () => {
+      map.getCanvas().style.cursor = 'pointer';
+    });
+    map.on('mouseleave', layer, () => {
+      map.getCanvas().style.cursor = '';
+    });
+  }
+
+  // Train point click → popup + selection.
+  map.on('click', 'train-point', (e) => {
+    const f = e.features?.[0];
+    if (!f) return;
+    const props = f.properties as {
+      trainId: string;
+      trackId: string;
+      speed: number;
+    };
+    const coords = (f.geometry as GeoJSON.Point).coordinates as [number, number];
+
+    useMapStore.getState().selectTrain(props.trainId);
+
+    popup?.remove();
+    popup = new maplibregl.Popup({ offset: 10, closeButton: true })
+      .setLngLat(coords)
+      .setHTML(
+        `<div style="font-family:system-ui;font-size:12px;line-height:1.5">
+           <strong style="font-size:13px">${props.trainId}</strong><br/>
+           Track: ${props.trackId || '—'}<br/>
+           Speed: ${props.speed ?? 0} km/h
+         </div>`,
+      )
+      .addTo(map);
   });
 }

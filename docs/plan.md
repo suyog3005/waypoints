@@ -259,7 +259,7 @@ This is based on patterns proven in [RIVM INFRA](https://gitlab.local.hacon.de/t
 
 _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md](../PHASE_10A_IMPLEMENTATION.md)._
 
-**Status: PHASE 10a.5 COMPLETE** (Map events + polling loop)
+**Status: PHASE 10a.6 COMPLETE** (Map layers + rendering polish)
 
 - ✅ Phase 9C completion verified (all 7 tasks done)
 - ✅ Dependencies installed: maplibre-gl@5.24.0, zustand@4.5.7, dexie@4.4.2
@@ -271,8 +271,9 @@ _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md
 - ✅ 5 core map components built (MapContainer, TrainLayer, BlockLayer, TimeControls, MapSidebar)
 - ✅ API hooks built (useBaseGraph, useTrainPositions) + tile-management + train-positioning utilities
 - ✅ Polling coordinator wired (usePollingCoordinator) + train/block layers render reactively
-- ✅ Build verified: 15 routes, 0 errors (map page 288 kB with Maplibre GL)
-- 🔄 Next: 10a.6 (map layers polish — clustering, popups, restriction overlay)
+- ✅ Layer polish: train clustering + count labels, popups, restriction overlay, glyphs source
+- ✅ Build verified: 15 routes, 0 errors (map page 278 kB with Maplibre GL)
+- 🔄 Next: 10a.7 (map integration into app router — verify nav, responsive layout)
 
 **10a Frontend Tasks** (8–9 days)
 
@@ -314,13 +315,13 @@ _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md
    - [x] Train + block GeoJSON sources updated reactively (filtered by displayTime)
    - [x] Train layer (circle, minzoom 12) + block layer (line, amber) added to map
 
-6. **10a.6 Map Layers & Rendering** (1 day)
-   - Base graph layer: render nodes as circles (#333, radius 3), edges as lines (#666, width 2)
-   - Station labels (minZoom: 12)
-   - Platform labels (minZoom: 14)
-   - Train layer (clustered by default, uncluster on zoom)
-   - Block occupancy overlay (colored segments)
-   - Layer visibility toggles → update Maplibre `setLayout({ visibility })`
+6. **✓ 10a.6 Map Layers & Rendering** (1 day) — ✅ COMPLETE
+   - [x] Base graph layer: nodes (circles, color by type), edges (lines), station labels
+   - [x] Train layer: clustered (clusterMaxZoom 13, radius 45) with count labels + individual points
+   - [x] Block occupancy overlay (amber lines, opacity 0.5)
+   - [x] Restriction overlay (red dashed lines) + sidebar toggle
+   - [x] Cluster click → zoom in; train click → popup + store selection
+   - [x] Glyphs source added for text layers; layer visibility toggles wired
 
 7. **10a.7 Map Integration into App** (0.5 days)
    - Add `/infrastructure/map` route to app router

@@ -45,6 +45,11 @@ export function MapSidebar() {
             onChange={(v) => setLayerVisible('blocks', v)}
           />
           <LayerToggle
+            label="Restrictions"
+            checked={layersVisible.restrictions}
+            onChange={(v) => setLayerVisible('restrictions', v)}
+          />
+          <LayerToggle
             label="Labels"
             checked={layersVisible.labels}
             onChange={(v) => setLayerVisible('labels', v)}

@@ -420,6 +420,24 @@ when a phase's tasks are finished.
 
 - **Next Immediate Action** (10a.6): Map layers polish — train clustering, popups, restriction overlay, label minZoom tuning
 
+### 2026-09-09 — Phase 10a.6 Complete (Map Layers + Rendering)
+
+- **Phase 10a.6 Status**: ✅ COMPLETE
+  - **Train Clustering** (`MapContainer.tsx`):
+    - `trains` source now `cluster: true` (clusterMaxZoom 13, clusterRadius 45).
+    - `train-cluster` (color/radius step by point_count) + `train-cluster-count` (abbreviated count) + `train-point` (individual, no cluster) layers.
+  - **Interactions** (`wireMapInteractions`):
+    - Cluster click → `getClusterExpansionZoom` → `easeTo` zoom-in.
+    - Train point click → Maplibre `Popup` (trainId, track, speed) + `selectTrain` in map.store.
+    - Cursor pointer on hover for cluster + point layers.
+  - **Restriction Overlay**: `restrictions` source + `restriction-segments` layer (red dashed). Sidebar toggle added. Data fed by backend (10a.8).
+  - **Glyphs**: Added `glyphs` source (demotiles.maplibre.org) so symbol/text layers (station labels, cluster counts) render.
+  - **Layer Visibility**: Now includes `train-cluster-count` + `restriction-segments`.
+  - **Build Status**: ✅ 15 routes, 0 errors. Map page 278 kB, shared First Load JS 87.6 kB.
+  - **Note**: Restriction layer renders but has no data yet (backend 10a.8). Cluster count font uses 'Open Sans Bold' from the glyphs source.
+
+- **Next Immediate Action** (10a.7): Verify map integration into app router — sidebar nav link, responsive layout, (shell) layout behavior
+
 ### 2026-09-09 — Phase 10a.1 Complete (Infrastructure Scaffolding)
 
 - **Phase 10a.1 Status**: ✅ COMPLETE
