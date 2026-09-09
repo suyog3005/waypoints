@@ -258,20 +258,25 @@ This is based on patterns proven in [RIVM INFRA](https://gitlab.local.hacon.de/t
 
 _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md](../PHASE_10A_IMPLEMENTATION.md)._
 
-**Status: IN PROGRESS** (Started 2026-09-09)
+**Status: PHASE 10a.1 COMPLETE** (Infrastructure scaffolding done)
 - ✅ Phase 9C completion verified (all 7 tasks done)
-- ✅ Dependencies installed: maplibre-gl, zustand
-- ✅ Implementation plan created (PHASE_10A_IMPLEMENTATION.md)
-- ✅ Todo list created (11-item Phase 10a checklist)
-- 🔄 Next: 10a.1 (dexie install, initial component scaffolding)
+- ✅ Dependencies installed: maplibre-gl@5.24.0, zustand@4.5.7, dexie@4.4.2
+- ✅ Directory structure created: /stores, /components/map, /app/infrastructure/map
+- ✅ Map page created: /app/infrastructure/map/page.tsx with placeholder UI
+- ✅ Zustand stores created: map.store.ts, tile.store.ts, time.store.ts with TS interfaces
+- ✅ Build verified: 15 routes, 0 errors, dev server running on :3001
+- 🔄 Next: 10a.2 (add localStorage persistence to stores)
 
 **10a Frontend Tasks** (8–9 days)
 
-1. **10a.1 Dependencies & Map Setup** (1 day)
-   - Install: `maplibre-gl@^5.0.0`, `@maplibre/maplibre-gl-language-support`, optional `react-map-gl@^7.0.0` for React bindings
-   - Create `/frontend/app/infrastructure/map/page.tsx` (map root page)
-   - Create `/frontend/components/map/` directory structure for map-related components
-   - Verify build passes with new dependencies
+1. **✓ 10a.1 Dependencies & Map Setup** (1 day) — ✅ COMPLETE
+   - [x] Install: `maplibre-gl@^5.24.0` ✅
+   - [x] Install: `zustand@^4.5.7` ✅
+   - [x] Install: `dexie@^4.4.2` ✅
+   - [x] Create `/frontend/app/infrastructure/map/page.tsx` ✅
+   - [x] Create `/frontend/components/map/` directory ✅
+   - [x] Create `/frontend/stores/` directory with 3 stores ✅
+   - [x] Verify build passes (15 routes, 0 errors) ✅
 
 2. **10a.2 State Management** (1 day)
    - Create `stores/map.store.ts` (Zustand): zoom, center, extent, selectedTrainId, selectedRestrictionId, layersVisible (persisted to localStorage)

@@ -352,33 +352,30 @@ when a phase's tasks are finished.
 
 > Newest entries at the top. One entry per agent turn that changes the repo.
 
-### 2026-09-09 — Phase 10a Implementation Start (In Progress)
+### 2026-09-09 — Phase 10a.1 Complete (Infrastructure Scaffolding)
 
-- **Phase 9C Status Verified**: ✅ All 7 tasks COMPLETE
-  - Recharts 2.12.0 installed + BlockGantt component built
-  - FreshnessIndicator component built (shows synced_at with color coding)
-  - Network page built (simplified schematic, React Flow unavailable)
-  - Alerts stub page built
-  - Settings stub page with theme toggle built
-  - Full build: 14 routes, 87.5 kB shared First Load JS, 0 errors, dev server running
-
-- **Phase 10a Kickoff**:
+- **Phase 10a.1 Status**: ✅ COMPLETE
   - **Dependencies Installed**:
-    - `maplibre-gl@^5.24.0` ✅ (25 packages added)
-    - `zustand@^4.5.7` ✅ (2 packages added)
-    - Next: `dexie@^4.4.2` (will be installed in 10a.1 proper task)
-  - **Documentation Created**: `PHASE_10A_IMPLEMENTATION.md` (11-section implementation roadmap with task breakdown, timeline, success criteria)
-  - **Todo List Created**: 11-item Phase 10a checklist tracking all frontend/backend tasks
-  - **Frontend Task Breakdown**: 7 major tasks spanning 10 days (10a.1 through 10a.10)
-  - **Backend Task Breakdown**: 2 major tasks (POST /trainpositions endpoint + tile version tracking)
-  
-- **File Structure Plan**:
-  - New directories: `stores/`, `components/map/`, `app/infrastructure/`
-  - New frontend files: map stores (3), map components (5), hooks (2), utilities (2)
-  - New backend files: train_positions router, tile schemas
-  - Reference: See `PHASE_10A_IMPLEMENTATION.md` for complete file list
+    - `maplibre-gl@^5.24.0` ✅ (25 packages)
+    - `zustand@^4.5.7` ✅ (2 packages)  
+    - `dexie@^4.4.2` ✅ (1 package)
+  - **File Structure Created**:
+    - `/frontend/stores/` directory with 3 Zustand stores (map, tile, time)
+    - `/frontend/components/map/` directory for map components
+    - `/frontend/app/infrastructure/map/page.tsx` (placeholder UI with sidebar + map area)
+    - Proper TypeScript interfaces and selectors in all stores
+  - **Build Status**: ✅ 15 routes, 0 errors, 87.5 kB shared First Load JS
+  - **Dev Server**: ✅ Running on http://localhost:3001 with file watching enabled
+  - **Git Commit**: `db29d05` - "feat: Phase 10a.1 - Map infrastructure scaffolding"
 
-- **Next Immediate Action** (10a.1): Install dexie, create initial component/store files, verify build
+- **Zustand Store Architecture**:
+  - `map.store.ts`: Viewport (zoom, center, extent), feature selection, layer visibility
+  - `tile.store.ts`: Visible tiles, version cache, loading state, failed tile tracking
+  - `time.store.ts`: Business clock, time offset, custom time picker, displayTime() method
+  - All stores use `subscribeWithSelector` middleware for efficient component re-renders
+  - Pattern: Stores created with stubs; will be enhanced with localStorage in 10a.2
+
+- **Next Immediate Action** (10a.2): Add localStorage persistence to stores + sidebar navigation update
 
 ### 2026-09-09 — Phase 9C Visualization & Polish (DONE) + Phase 10 Map Architecture Designed
 
