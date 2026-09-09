@@ -5,7 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 
 /**
  * Map Page - Phase 10a.1 Scaffolding
- * 
+ *
  * Shows the railway infrastructure map with train positions, blocks, and time controls.
  * Components will be added in phases 10a.2-10a.7
  */
@@ -33,7 +33,7 @@ function MapContainer() {
             <h3 className="font-semibold text-slate-900 dark:text-slate-50">Map Controls</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Phase 10a.1: Infrastructure scaffolding</p>
           </div>
-          
+
           {/* Placeholder for TimeControls component (10a.3) */}
           <div className="space-y-2 border-t border-slate-200 dark:border-slate-800 pt-4">
             <h4 className="text-sm font-medium text-slate-700 dark:text-slate-300">Time Controls</h4>

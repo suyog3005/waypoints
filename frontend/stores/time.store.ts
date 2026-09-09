@@ -1,12 +1,12 @@
 /**
  * Time Store - Phase 10a.2
- * 
+ *
  * Manages business clock, time offset, and time-travel state
  * Enables viewing train positions at past or future moments
  */
 
 import { create } from 'zustand';
-import { subscribeWithSelector } from 'zustand/middleware';
+import { subscribeWithSelector, persist } from 'zustand/middleware';
 
 export interface TimeStore {
   // Business clock from backend (UNIX timestamp or ISO string)
@@ -32,18 +32,24 @@ export interface TimeStore {
 
 /**
  * useTimeStore - Time and time-travel state
- * 
+ *
+ * Persists timeOffset and customTimeEnabled to localStorage so the user's
+ * time-travel position survives page reloads. businessClock and customTime
+ * are NOT persisted (server-driven / session-specific).
+ *
  * Populated by:
  * - Phase 10a.8: API response includes latest businessClock
  * - Phase 10a.5: TimeControls component updates timeOffset
- * 
+ *
  * Used by:
  * - Phase 10a.5: Polling coordinator (reads displayTime for tile ID)
  * - Phase 10a.3: TimeControls component (updates timeOffset)
  * - Phase 10a.6: Train filtering (filters by displayTime)
  */
 export const useTimeStore = create<TimeStore>()(
-  subscribeWithSelector((set, get) => ({
+  subscribeWithSelector(
+    persist(
+      (set, get) => ({
     // Business clock from backend
     businessClock: new Date(),
     setBusinessClock: (clock) => set({ businessClock: clock }),
@@ -74,7 +80,16 @@ export const useTimeStore = create<TimeStore>()(
       }
       return new Date(state.businessClock.getTime() + state.timeOffset);
     },
-  }))
+      }),
+      {
+        name: 'time-store',
+        partialize: (state) => ({
+          timeOffset: state.timeOffset,
+          customTimeEnabled: state.customTimeEnabled,
+        }),
+      }
+    )
+  )
 );
 
 // Selectors for efficient re-renders (Phase 10a.5)

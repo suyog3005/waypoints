@@ -23,9 +23,9 @@ statement). Full context lives in:
 - [frontend-plan.md](./frontend-plan.md) — frontend brainstorm/design reference (stack,
   pages, components, the track-schematic "map" decision) and Phase 9 sub-phase
   breakdown (9A/9B/9C).
-- [MAP_VISUALIZATION_ARCHITECTURE.md](./MAP_VISUALIZATION_ARCHITECTURE.md) — **NEW** 
-  (2026-09-09): Detailed design for Phase 10 map-based visualization, including 3D 
-  tiling strategy (X, Y, Time), real-time polling, Maplibre GL JS stack, 
+- [MAP_VISUALIZATION_ARCHITECTURE.md](./MAP_VISUALIZATION_ARCHITECTURE.md) — **NEW**
+  (2026-09-09): Detailed design for Phase 10 map-based visualization, including 3D
+  tiling strategy (X, Y, Time), real-time polling, Maplibre GL JS stack,
   backend tile versioning. Based on analysis of RIVM INFRA production railway system.
 
 Read those files before making architectural decisions. This file (`agent.md`)
@@ -352,12 +352,30 @@ when a phase's tasks are finished.
 
 > Newest entries at the top. One entry per agent turn that changes the repo.
 
+### 2026-09-09 — Phase 10a.2 Complete (State Management + localStorage)
+
+- **Phase 10a.2 Status**: ✅ COMPLETE
+  - **localStorage Persistence Added**:
+    - `map.store.ts`: viewport (zoom, center, extent) + layersVisible persisted via `persist` middleware
+    - `time.store.ts`: timeOffset + customTimeEnabled persisted via `persist` middleware
+    - `tile.store.ts`: NOT persisted (session-specific tile cache, rebuilt on each viewport change)
+  - **Sidebar Navigation Updated**:
+    - Added Map link (`/infrastructure/map`) with `Map` icon from lucide-react
+    - Placed between Track Network and Trains in nav order
+  - **Build Status**: ✅ 15 routes, 0 errors, 87.5 kB shared First Load JS
+  - **Persistence Strategy**:
+    - `partialize` used to exclude non-persistable state (selections, businessClock, tile cache)
+    - Storage keys: `map-store`, `time-store`
+    - Zustand `persist` middleware handles hydration on app load
+
+- **Next Immediate Action** (10a.3): Create 5 core map components (MapContainer, TrainLayer, BlockLayer, TimeControls, MapSidebar)
+
 ### 2026-09-09 — Phase 10a.1 Complete (Infrastructure Scaffolding)
 
 - **Phase 10a.1 Status**: ✅ COMPLETE
   - **Dependencies Installed**:
     - `maplibre-gl@^5.24.0` ✅ (25 packages)
-    - `zustand@^4.5.7` ✅ (2 packages)  
+    - `zustand@^4.5.7` ✅ (2 packages)
     - `dexie@^4.4.2` ✅ (1 package)
   - **File Structure Created**:
     - `/frontend/stores/` directory with 3 Zustand stores (map, tile, time)
@@ -407,13 +425,13 @@ when a phase's tasks are finished.
     - **Phase 10a** (MVP, 11 days): Core map rendering, base graph from GET /basegraph, 3D tile computation + polling, train positions, time-travel controls, layer toggles, backend tile versioning
     - **Phase 10b** (advanced, 10 days): WebSocket upgrade, restriction overlays, label collision avoidance, playback controls, block occupancy visualization
     - **Phase 10c** (polish, 5+ days): Worker thread for tile math, tile pre-fetching, mobile responsiveness, accessibility
-  - **Key Decisions**: 
+  - **Key Decisions**:
     - Map engine: **Maplibre GL JS** (lighter than OpenLayers, better vector tile + Cartesian support, ~200 kB gzipped)
     - State: **TanStack Query + Zustand** (not NgRx; simpler for Next.js/React)
     - Real-time: **HTTP polling (2 sec)** initially, WebSocket upgrade in Phase 10b
     - Caching: **IndexedDB (Dexie) + localStorage** (same as RIVM pattern)
     - Persistence: localStorage for layer visibility, filter state, custom clock settings
-  
+
 - **Documentation Updated**:
   - `docs/plan.md` Phase 9C section: marked all 7 tasks DONE, added React Flow unavailability note
   - `docs/plan.md` Phase 10: Expanded from stub "Real-Time Loop Wiring" into comprehensive Phase 10a/10b/10c with detailed task lists, effort estimates, dependencies

@@ -1,7 +1,7 @@
 # Map Visualization Architecture — 3D Tiling Strategy for Team-Waypoints
 
 > **Purpose**: Document the advanced map visualization requirements for Phase 10+ based on analysis of RIVM INFRA (a production railway visualization system).
-> 
+>
 > **Scope**: Complete reference architecture for rendering train positions on a geographical/schematic network map with time-travel support, real-time updates, and 3D data tiling.
 >
 > **Status**: Design phase (not yet built; guides future phases).
@@ -66,14 +66,14 @@ A dispatcher or planner opens the application to a **full-screen map**. The map 
 
 ## 1.2 User workflows
 
-| # | Workflow | Example |
-|---|----------|---------|
-| **A** | **Browse real-time** | Dispatcher opens app at 09:15 and sees all trains as they are now, updating every 2 sec. |
-| **B** | **Look backwards** | Adjust time slider to 08:30 to see what happened 45 minutes ago. |
-| **C** | **Look forward** | Pick a future date/time (tomorrow 14:00) to see the predicted train positions. |
-| **D** | **Inspect a train** | Double-click or search for train #2843; panel opens showing stops, delay, platform track, edit capability. |
+| #     | Workflow                | Example                                                                                                        |
+| ----- | ----------------------- | -------------------------------------------------------------------------------------------------------------- |
+| **A** | **Browse real-time**    | Dispatcher opens app at 09:15 and sees all trains as they are now, updating every 2 sec.                       |
+| **B** | **Look backwards**      | Adjust time slider to 08:30 to see what happened 45 minutes ago.                                               |
+| **C** | **Look forward**        | Pick a future date/time (tomorrow 14:00) to see the predicted train positions.                                 |
+| **D** | **Inspect a train**     | Double-click or search for train #2843; panel opens showing stops, delay, platform track, edit capability.     |
 | **E** | **Apply a restriction** | Select a time window and track segment, then toggle a restriction (blockage, speed reduction) active/inactive. |
-| **F** | **Layering** | Toggle trains on/off, restrictions on/off, labels on/off to declutter the map. |
+| **F** | **Layering**            | Toggle trains on/off, restrictions on/off, labels on/off to declutter the map.                                 |
 
 ---
 
@@ -81,43 +81,43 @@ A dispatcher or planner opens the application to a **full-screen map**. The map 
 
 ## 2.1 RIVM INFRA architecture
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Map engine** | OpenLayers 10 | Renders nodes, edges, trains, restrictions; handles clustering, collision-avoiding labels. |
-| **Coordinate system** | Cartesian (X, Y) or geographical | Infrastructure graph with microscopically accurate node placement. |
-| **State management** | NgRx (classic) + NgRx Signal Stores | Business clock, base graph, tile state, train positions, restrictions, panel state. |
-| **Time system** | Business clock (REALTIME / CONTROLLED) | Synced from server, can be offset locally. |
-| **Real-time data** | RabbitMQ (inbound) + HTTP polling (frontend) | ETLs consume upstream events, write to MongoDB; frontend polls `/trainpositions` per visible tile every 2 sec. |
-| **Data transfer** | 3D tile versioning (`{id, version}`) | Tiles have a UUID version; unchanged tiles return empty page (delta transfer). |
-| **Caching** | IndexedDB (Dexie) + localStorage | Base graph, map config, location-track coordinates cached locally; filter state to localStorage. |
-| **Database** | MongoDB only | Operational and read stores both in Mongo. |
-| **Latency** | ~200 ms per HTTP polling cycle | Acceptable for dispatcher workflow. |
-| **Scale** | Handles ~1000s of trains per tile | Clustering + renderer optimization. |
+| Component             | Technology                                   | Purpose                                                                                                        |
+| --------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| **Map engine**        | OpenLayers 10                                | Renders nodes, edges, trains, restrictions; handles clustering, collision-avoiding labels.                     |
+| **Coordinate system** | Cartesian (X, Y) or geographical             | Infrastructure graph with microscopically accurate node placement.                                             |
+| **State management**  | NgRx (classic) + NgRx Signal Stores          | Business clock, base graph, tile state, train positions, restrictions, panel state.                            |
+| **Time system**       | Business clock (REALTIME / CONTROLLED)       | Synced from server, can be offset locally.                                                                     |
+| **Real-time data**    | RabbitMQ (inbound) + HTTP polling (frontend) | ETLs consume upstream events, write to MongoDB; frontend polls `/trainpositions` per visible tile every 2 sec. |
+| **Data transfer**     | 3D tile versioning (`{id, version}`)         | Tiles have a UUID version; unchanged tiles return empty page (delta transfer).                                 |
+| **Caching**           | IndexedDB (Dexie) + localStorage             | Base graph, map config, location-track coordinates cached locally; filter state to localStorage.               |
+| **Database**          | MongoDB only                                 | Operational and read stores both in Mongo.                                                                     |
+| **Latency**           | ~200 ms per HTTP polling cycle               | Acceptable for dispatcher workflow.                                                                            |
+| **Scale**             | Handles ~1000s of trains per tile            | Clustering + renderer optimization.                                                                            |
 
 ## 2.2 Team-Waypoints current state (Phase 9C)
 
-| Component | Technology | Status |
-|-----------|-----------|--------|
-| **Map engine** | None yet | Dashboard shows KPI cards only. |
-| **Frontend** | Next.js 14 + React 18 + Tailwind CSS | Production-ready for CRUD pages. |
-| **State management** | TanStack Query (data fetching) + React hooks | No global store; local component state. |
-| **Real-time data** | Not implemented | Backend is Python FastAPI; no Kafka consumer in frontend. |
-| **Database** | PostgreSQL (Operational) + SQLite (Read Store) | OLTP-optimized, no time-series data. |
-| **API contracts** | REST only (`GET /plans`, `POST /block-requests`, etc.) | No streaming or WebSocket. |
-| **Time system** | Static timestamps in data | No business clock, no time-travel UI. |
-| **Caching** | TanStack Query (10s staleness) | No IndexedDB, no local persistence. |
+| Component            | Technology                                             | Status                                                    |
+| -------------------- | ------------------------------------------------------ | --------------------------------------------------------- |
+| **Map engine**       | None yet                                               | Dashboard shows KPI cards only.                           |
+| **Frontend**         | Next.js 14 + React 18 + Tailwind CSS                   | Production-ready for CRUD pages.                          |
+| **State management** | TanStack Query (data fetching) + React hooks           | No global store; local component state.                   |
+| **Real-time data**   | Not implemented                                        | Backend is Python FastAPI; no Kafka consumer in frontend. |
+| **Database**         | PostgreSQL (Operational) + SQLite (Read Store)         | OLTP-optimized, no time-series data.                      |
+| **API contracts**    | REST only (`GET /plans`, `POST /block-requests`, etc.) | No streaming or WebSocket.                                |
+| **Time system**      | Static timestamps in data                              | No business clock, no time-travel UI.                     |
+| **Caching**          | TanStack Query (10s staleness)                         | No IndexedDB, no local persistence.                       |
 
 ## 2.3 Key differences
 
-| Aspect | RIVM INFRA | Team-Waypoints |
-|--------|-----------|-----------------|
-| **Purpose** | Real-time operational dispatch | Block planning / optimization |
-| **Update frequency** | Every 2 sec (trains move) | Every 5–10 min (blocks don't move as often) |
-| **Viewport focus** | Tracks + current/forecast trains | Tracks + blocks (derived from trains) |
-| **Geographic scope** | Entire railway network | One corridor or division |
-| **Complexity** | Microscopically accurate (millions of nodes) | Simplified schematic or Cartesian (hundreds of nodes) |
-| **Backend write** | RabbitMQ events (upstream RIDS system) | Kafka events (internal: command service → optimization) |
-| **Read consistency** | Eventually consistent (tiles versioned) | Strongly consistent (no cache beyond 10s) |
+| Aspect               | RIVM INFRA                                   | Team-Waypoints                                          |
+| -------------------- | -------------------------------------------- | ------------------------------------------------------- |
+| **Purpose**          | Real-time operational dispatch               | Block planning / optimization                           |
+| **Update frequency** | Every 2 sec (trains move)                    | Every 5–10 min (blocks don't move as often)             |
+| **Viewport focus**   | Tracks + current/forecast trains             | Tracks + blocks (derived from trains)                   |
+| **Geographic scope** | Entire railway network                       | One corridor or division                                |
+| **Complexity**       | Microscopically accurate (millions of nodes) | Simplified schematic or Cartesian (hundreds of nodes)   |
+| **Backend write**    | RabbitMQ events (upstream RIDS system)       | Kafka events (internal: command service → optimization) |
+| **Read consistency** | Eventually consistent (tiles versioned)      | Strongly consistent (no cache beyond 10s)               |
 
 ---
 
@@ -267,6 +267,7 @@ A dispatcher or planner opens the application to a **full-screen map**. The map 
 ## 4.1 Frontend React Components
 
 ### **1. `MapContainer.tsx`** (root map component)
+
 ```typescript
 interface MapContainerProps {
   baseGraphData: BaseGraph;
@@ -284,6 +285,7 @@ interface MapContainerProps {
 ```
 
 **Responsibilities:**
+
 - Initialize Maplibre GL instance with a Cartesian or geographical style.
 - Render base map layers (base, tracks, stations).
 - Dynamically add/remove train position features (refresh on every POST /trainpositions response).
@@ -295,6 +297,7 @@ interface MapContainerProps {
 ---
 
 ### **2. `TimeControls.tsx`** (header clock and sliders)
+
 ```typescript
 interface TimeControlsProps {
   businessClock: BusinessClock;
@@ -306,6 +309,7 @@ interface TimeControlsProps {
 ```
 
 **Responsibilities:**
+
 - Display current business time (mode: REALTIME or CONTROLLED).
 - Offset slider (±10 to +50 minutes, step 5 sec).
 - Date/time picker modal (jump to arbitrary past/future moment).
@@ -315,6 +319,7 @@ interface TimeControlsProps {
 ---
 
 ### **3. `TrainListPanel.tsx`** (left sidebar)
+
 ```typescript
 interface TrainListPanelProps {
   trains: TrainView[];
@@ -325,6 +330,7 @@ interface TrainListPanelProps {
 ```
 
 **Responsibilities:**
+
 - Table of current trains (from `useTrainPositions` hook).
 - Sortable columns: train #, line, status, current platform, ETA, delay.
 - Click row → highlight on map; double-click → open edit panel.
@@ -333,16 +339,18 @@ interface TrainListPanelProps {
 ---
 
 ### **4. `RestrictionListPanel.tsx`** (left sidebar)
+
 ```typescript
 interface RestrictionListPanelProps {
   restrictions: Restriction[];
   selectedRestrictionId?: string;
   onSelectRestriction: (id) => void;
-  onToggleActive: (id, newState: 'ACTIVE' | 'INACTIVE') => void;
+  onToggleActive: (id, newState: "ACTIVE" | "INACTIVE") => void;
 }
 ```
 
 **Responsibilities:**
+
 - Table of restrictions (track, type, start time, end time, severity).
 - Toggle buttons (Activate / Deactivate).
 - Click row → highlight segment on map.
@@ -350,7 +358,9 @@ interface RestrictionListPanelProps {
 ---
 
 ### **5. `TrainDetailPanel.tsx` / `TrainEditPanel.tsx`** (right sidebar)
+
 Similar to current Phase 9B implementation, plus:
+
 - Display train's current position and block occupancy on map.
 - Edit arrival/departure times → re-calculate blocks → live update on map.
 
@@ -363,7 +373,7 @@ Similar to current Phase 9B implementation, plus:
 type MapStore = {
   zoom: number;
   center: { x: number; y: number };
-  extent: { minX, maxX, minY, maxY };
+  extent: { minX; maxX; minY; maxY };
   layersVisible: { trains: bool; restrictions: bool; labels: bool };
   selectedTrainId?: string;
   selectedRestrictionId?: string;
@@ -436,10 +446,10 @@ const tileWidth = trainsLayer.tileSize.width; // 10000
 const tileHeight = trainsLayer.tileSize.height; // 10000
 const tileTimeSpan = trainsLayer.tileSize.timeSpanSecs / 60; // 15 minutes
 
-const minX = Math.min(...nodes.map(n => n.x));
-const maxX = Math.max(...nodes.map(n => n.x));
-const minY = Math.min(...nodes.map(n => n.y));
-const maxY = Math.max(...nodes.map(n => n.y));
+const minX = Math.min(...nodes.map((n) => n.x));
+const maxX = Math.max(...nodes.map((n) => n.x));
+const minY = Math.min(...nodes.map((n) => n.y));
+const maxY = Math.max(...nodes.map((n) => n.y));
 
 const gridMinX = Math.floor(minX / tileWidth) * tileWidth;
 const gridMaxX = Math.ceil(maxX / tileWidth) * tileWidth;
@@ -448,30 +458,42 @@ const gridMaxY = Math.ceil(maxY / tileHeight) * tileHeight;
 
 // Step 2: Compute visible tiles in the current viewport
 const visibleTiles = [];
-for (let x = Math.max(gridMinX, Math.floor(mapExtent.minX / tileWidth) * tileWidth);
-     x < Math.min(gridMaxX, Math.ceil(mapExtent.maxX / tileWidth) * tileWidth);
-     x += tileWidth) {
-  for (let y = Math.max(gridMinY, Math.floor(mapExtent.minY / tileHeight) * tileHeight);
-       y < Math.min(gridMaxY, Math.ceil(mapExtent.maxY / tileHeight) * tileHeight);
-       y += tileHeight) {
+for (
+  let x = Math.max(
+    gridMinX,
+    Math.floor(mapExtent.minX / tileWidth) * tileWidth,
+  );
+  x < Math.min(gridMaxX, Math.ceil(mapExtent.maxX / tileWidth) * tileWidth);
+  x += tileWidth
+) {
+  for (
+    let y = Math.max(
+      gridMinY,
+      Math.floor(mapExtent.minY / tileHeight) * tileHeight,
+    );
+    y < Math.min(gridMaxY, Math.ceil(mapExtent.maxY / tileHeight) * tileHeight);
+    y += tileHeight
+  ) {
     const tileId = `${x}_${y}_${roundToInterval(businessTime, tileTimeSpan)}`;
     visibleTiles.push(tileId);
   }
 }
 
 // Step 3: Compare against stored version UUIDs
-const tilesWithVersions = visibleTiles.map(id => ({
+const tilesWithVersions = visibleTiles.map((id) => ({
   id,
   version: tileVersionCache.get(id), // undefined on first request
 }));
 
 // Step 4: POST to backend
-const response = await POST('/trainpositions', { tiles: tilesWithVersions });
+const response = await POST("/trainpositions", { tiles: tilesWithVersions });
 // Response: { data: TrainPosition[], meta: { dataTileVersions: { "125000_-10000_2026-08-31T09:15": "abc...uuid" } } }
 
 // Step 5: Update version cache
 if (response.meta?.dataTileVersions) {
-  for (const [tileId, version] of Object.entries(response.meta.dataTileVersions)) {
+  for (const [tileId, version] of Object.entries(
+    response.meta.dataTileVersions,
+  )) {
     tileVersionCache.set(tileId, version);
   }
 }
@@ -518,11 +540,13 @@ When a train position is written or updated, the ETL bumps the tile's `version` 
 ```
 
 **Rationale for polling vs. WebSocket:**
+
 - Simpler to implement without a full WebSocket infrastructure.
 - Acceptable latency for a planning tool (trains don't move as fast as real dispatch).
 - Redis cache ensures the backend doesn't re-query Postgres on every poll.
 
 **Future upgrade (Phase 10b):**
+
 ```
 POST /trainpositions → WebSocket /stream/trainpositions?tiles=[...]
   Server pushes only changed trains every ~1 sec
@@ -625,8 +649,8 @@ Combine **TanStack Query** (data fetching) + **Zustand** (UI state) + **localSto
 
 ```typescript
 // stores/map.store.ts
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 interface MapState {
   zoom: number;
@@ -635,7 +659,7 @@ interface MapState {
   layersVisible: Record<string, boolean>;
   selectedTrainId?: string;
   selectedRestrictionId?: string;
-  
+
   setZoom: (z: number) => void;
   setCenter: (c: { x: number; y: number }) => void;
   setExtent: (e: typeof MapState.extent) => void;
@@ -657,28 +681,30 @@ export const useMapStore = create<MapState>()(
       setCenter: (c) => set({ center: c }),
       setExtent: (e) => set({ extent: e }),
       setLayerVisible: (layer, visible) =>
-        set((state) => ({ layersVisible: { ...state.layersVisible, [layer]: visible } })),
+        set((state) => ({
+          layersVisible: { ...state.layersVisible, [layer]: visible },
+        })),
       selectTrain: (id) => set({ selectedTrainId: id }),
       selectRestriction: (id) => set({ selectedRestrictionId: id }),
     }),
     {
-      name: 'infra-map-store',
+      name: "infra-map-store",
       partialize: (state) => ({ layersVisible: state.layersVisible }),
-    }
-  )
+    },
+  ),
 );
 
 // hooks/useTrainPositions.ts
 export function useTrainPositions(tiles: string[], businessTime: Date) {
   return useQuery({
-    queryKey: ['trainpositions', tiles, businessTime.toISOString()],
+    queryKey: ["trainpositions", tiles, businessTime.toISOString()],
     queryFn: async () => {
-      const tilesWithVersions = tiles.map(id => ({
+      const tilesWithVersions = tiles.map((id) => ({
         id,
         version: tileVersionCache.get(id),
       }));
-      const res = await apiFetch('/trainpositions', {
-        method: 'POST',
+      const res = await apiFetch("/trainpositions", {
+        method: "POST",
         body: tilesWithVersions,
       });
       // Update version cache from response
@@ -702,9 +728,11 @@ export function useTrainPositions(tiles: string[], businessTime: Date) {
 ## 9.1 Endpoints (Query Service, Port 8002)
 
 ### `GET /basegraph`
+
 Returns the static infrastructure graph (paginated).
 
 **Response:**
+
 ```json
 {
   "data": [
@@ -715,7 +743,13 @@ Returns the static infrastructure graph (paginated).
         { "id": "n2", "x": 10000, "y": 0, "name": "Junction 1" }
       ],
       "edges": [
-        { "id": "e1", "fromNodeId": "n1", "toNodeId": "n2", "distance": 10000, "speed": 100 }
+        {
+          "id": "e1",
+          "fromNodeId": "n1",
+          "toNodeId": "n2",
+          "distance": 10000,
+          "speed": 100
+        }
       ]
     }
   ],
@@ -724,9 +758,11 @@ Returns the static infrastructure graph (paginated).
 ```
 
 ### `POST /trainpositions`
+
 Returns train positions for the given tiles (with versioning).
 
 **Request:**
+
 ```json
 [
   { "id": "125000_-10000_2026-08-31T09:15", "version": "8f1c...uuid" },
@@ -735,13 +771,15 @@ Returns train positions for the given tiles (with versioning).
 ```
 
 **Response:**
+
 ```json
 {
   "data": [
     {
       "id": "train-pos-001",
       "trainServiceId": "T2843",
-      "x": 127500, "y": -5000,
+      "x": 127500,
+      "y": -5000,
       "fromTime": "2026-08-31T09:15:00Z",
       "toTime": "2026-08-31T09:30:00Z",
       "dataTileIds": ["125000_-10000_2026-08-31T09:15"],
@@ -758,12 +796,15 @@ Returns train positions for the given tiles (with versioning).
 ```
 
 ### `GET /blocks`
+
 Returns blocks (derived from train positions). Filterable by `planId`, `trackId`, `status`.
 
 ### `GET /restrictions`
+
 Returns active restrictions at a given time (`?effectiveAt=<ISO>`).
 
 ### `GET /business-clock`
+
 Returns current business clock (mode, time, timezone).
 
 ---
@@ -781,6 +822,7 @@ BUSINESS_CLOCK_KEY = "business_clock:current"  # TTL: 5 sec
 ```
 
 **Rationale:**
+
 - Base graph is mostly static → long TTL.
 - Train positions change frequently → short TTL.
 - Restrictions change less → medium TTL.
@@ -790,12 +832,12 @@ BUSINESS_CLOCK_KEY = "business_clock:current"  # TTL: 5 sec
 
 ```typescript
 // db/infra-db.ts
-const db = new Dexie('TEAM_WAYPOINTS_INFRA');
+const db = new Dexie("TEAM_WAYPOINTS_INFRA");
 db.version(1).stores({
-  baseGraph: '&id',
-  mapConfig: '&id',
-  locationTrackCoordinates: '&id',
-  filterState: '&key',
+  baseGraph: "&id",
+  mapConfig: "&id",
+  locationTrackCoordinates: "&id",
+  filterState: "&key",
 });
 
 // On bootstrap:
@@ -805,6 +847,7 @@ db.version(1).stores({
 ```
 
 Benefits:
+
 - Faster map load (no HTTP round-trip for static data).
 - Works offline (view only).
 - Survives browser restart.
@@ -815,19 +858,19 @@ Benefits:
 
 ## 11.1 Phase 10a — Core Map Visualization (MVP)
 
-| Task | Effort | Owner | Dependencies |
-|------|--------|-------|--------------|
-| **10a.1** Evaluate & install Maplibre GL + React bindings (`react-map-gl` or custom wrapper) | 1 day | Frontend | Phase 9C complete |
-| **10a.2** Render base graph (nodes, edges) from `GET /basegraph` | 1 day | Frontend | 10a.1 |
-| **10a.3** Implement 3D tile computation + polling loop | 2 days | Frontend | 10a.2 |
-| **10a.4** Render train positions on map (static test data first, then live) | 1 day | Frontend | 10a.3 |
-| **10a.5** Add time-offset slider + date/time picker (no business-clock backend yet) | 1 day | Frontend | 10a.4 |
-| **10a.6** Implement train selection & detail panel integration | 1 day | Frontend | 10a.5, Phase 9C |
-| **10a.7** Add layer visibility toggles (trains, restrictions, labels) to Ribbon | 1 day | Frontend | 10a.5 |
-| **10a.8** Backend: Implement `POST /trainpositions` with tile versioning | 2 days | Backend | Phase 6 (Read Store) |
-| **10a.9** Backend: Implement tile version tracking in Read Store ETL | 1 day | Backend | 10a.8 |
-| **10a.10** Integration testing: E2E tile polling + map update | 1 day | QA | 10a.9 |
-| | **11 days** (2 weeks) | | |
+| Task                                                                                         | Effort                | Owner    | Dependencies         |
+| -------------------------------------------------------------------------------------------- | --------------------- | -------- | -------------------- |
+| **10a.1** Evaluate & install Maplibre GL + React bindings (`react-map-gl` or custom wrapper) | 1 day                 | Frontend | Phase 9C complete    |
+| **10a.2** Render base graph (nodes, edges) from `GET /basegraph`                             | 1 day                 | Frontend | 10a.1                |
+| **10a.3** Implement 3D tile computation + polling loop                                       | 2 days                | Frontend | 10a.2                |
+| **10a.4** Render train positions on map (static test data first, then live)                  | 1 day                 | Frontend | 10a.3                |
+| **10a.5** Add time-offset slider + date/time picker (no business-clock backend yet)          | 1 day                 | Frontend | 10a.4                |
+| **10a.6** Implement train selection & detail panel integration                               | 1 day                 | Frontend | 10a.5, Phase 9C      |
+| **10a.7** Add layer visibility toggles (trains, restrictions, labels) to Ribbon              | 1 day                 | Frontend | 10a.5                |
+| **10a.8** Backend: Implement `POST /trainpositions` with tile versioning                     | 2 days                | Backend  | Phase 6 (Read Store) |
+| **10a.9** Backend: Implement tile version tracking in Read Store ETL                         | 1 day                 | Backend  | 10a.8                |
+| **10a.10** Integration testing: E2E tile polling + map update                                | 1 day                 | QA       | 10a.9                |
+|                                                                                              | **11 days** (2 weeks) |          |                      |
 
 **Output**: Functional map with real-time train visualization, time-travel slider, and tile caching.
 
@@ -835,14 +878,14 @@ Benefits:
 
 ## 11.2 Phase 10b — Advanced Features (future)
 
-| Task | Effort | Dependencies |
-|------|--------|--------------|
-| WebSocket upgrade (replace polling with streaming) | 2 days | 10a complete |
-| Block occupancy rendering (color-coded track segments) | 1 day | 10a complete |
-| Restriction overlays (speed, blockage icons) | 2 days | 10a complete + Phase 12 (Restrictions CRUD) |
-| Collision-avoiding train label placement | 3 days | 10a.4 |
-| Playback controls (animate train movement over time) | 2 days | 10a.5 |
-| **Total** | **10 days** | |
+| Task                                                   | Effort      | Dependencies                                |
+| ------------------------------------------------------ | ----------- | ------------------------------------------- |
+| WebSocket upgrade (replace polling with streaming)     | 2 days      | 10a complete                                |
+| Block occupancy rendering (color-coded track segments) | 1 day       | 10a complete                                |
+| Restriction overlays (speed, blockage icons)           | 2 days      | 10a complete + Phase 12 (Restrictions CRUD) |
+| Collision-avoiding train label placement               | 3 days      | 10a.4                                       |
+| Playback controls (animate train movement over time)   | 2 days      | 10a.5                                       |
+| **Total**                                              | **10 days** |                                             |
 
 ---
 
@@ -858,12 +901,14 @@ Benefits:
 # 12 — MIGRATION GUIDE: CURRENT ARCHITECTURE → MAP ARCHITECTURE
 
 ## Current State (Phase 9C)
+
 - Dashboard: KPI cards + data tables.
 - No map.
 - Polling: fetch-based per route (10s staleness).
 - State: TanStack Query + React hooks.
 
 ## Transition Steps
+
 1. **Phase 10a**: Add map page (`/infrastructure/map` or `/maps/main`) alongside existing dashboard. No changes to dashboard or existing routes.
 2. **Phase 10b**: Gradually migrate train/block/restriction views to map-centric (allow both dashboard table + map).
 3. **Phase 10c** (future): Retire table-based views in favor of map-only (if desired).
@@ -872,16 +917,15 @@ Benefits:
 
 ## Appendix A: Reference Architecture Comparison
 
-| Feature | RIVM INFRA | Team-Waypoints (Proposed) |
-|---------|-----------|--------------------------|
-| **Map engine** | OpenLayers 10 | Maplibre GL JS |
-| **State** | NgRx (classic + signals) | TanStack Query + Zustand |
-| **Caching** | IndexedDB + localStorage | IndexedDB (Dexie) + localStorage |
-| **Real-time** | RabbitMQ (backend) + HTTP polling (frontend, 2 sec) | HTTP polling (2 sec, 10 sec for restrictions) |
-| **Tile versioning** | UUID per tile | UUID per tile |
-| **Time-travel** | Business clock (REALTIME / CONTROLLED) + slider | Custom time + offset slider |
-| **Coordination system** | Cartesian (microscopically accurate) | Cartesian (schematic, simplified) |
-| **Scale** | 1000s of trains | 100s of trains (one corridor) |
-| **Complexity** | Very high | Medium (simpler scope) |
-| **Deployment** | Kubernetes + Helm | Docker Compose (local), potentially Kubernetes (production) |
-
+| Feature                 | RIVM INFRA                                          | Team-Waypoints (Proposed)                                   |
+| ----------------------- | --------------------------------------------------- | ----------------------------------------------------------- |
+| **Map engine**          | OpenLayers 10                                       | Maplibre GL JS                                              |
+| **State**               | NgRx (classic + signals)                            | TanStack Query + Zustand                                    |
+| **Caching**             | IndexedDB + localStorage                            | IndexedDB (Dexie) + localStorage                            |
+| **Real-time**           | RabbitMQ (backend) + HTTP polling (frontend, 2 sec) | HTTP polling (2 sec, 10 sec for restrictions)               |
+| **Tile versioning**     | UUID per tile                                       | UUID per tile                                               |
+| **Time-travel**         | Business clock (REALTIME / CONTROLLED) + slider     | Custom time + offset slider                                 |
+| **Coordination system** | Cartesian (microscopically accurate)                | Cartesian (schematic, simplified)                           |
+| **Scale**               | 1000s of trains                                     | 100s of trains (one corridor)                               |
+| **Complexity**          | Very high                                           | Medium (simpler scope)                                      |
+| **Deployment**          | Kubernetes + Helm                                   | Docker Compose (local), potentially Kubernetes (production) |

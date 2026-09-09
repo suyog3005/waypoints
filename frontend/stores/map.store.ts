@@ -1,12 +1,12 @@
 /**
  * Map Store - Phase 10a.2
- * 
+ *
  * Global state for map viewport (zoom, center, extent, selected features)
  * Will be enhanced in Phase 10a.2 with localStorage persistence
  */
 
 import { create } from 'zustand';
-import { subscribeWithSelector } from 'zustand/middleware';
+import { subscribeWithSelector, persist } from 'zustand/middleware';
 
 export interface MapViewport {
   zoom: number;
@@ -59,14 +59,15 @@ const defaultLayersVisible = {
 
 /**
  * useMapStore - Global map viewport and UI state
- * 
- * TODO (Phase 10a.2):
- * - Add localStorage persistence middleware
- * - Load initial state from localStorage if available
- * - Save viewport changes to localStorage on every update
+ *
+ * Persists viewport (zoom, center, extent) and layer visibility to localStorage.
+ * Selection state (selectedTrainId, selectedRestrictionId) is NOT persisted
+ * (session-specific).
  */
 export const useMapStore = create<MapStore>()(
-  subscribeWithSelector((set) => ({
+  subscribeWithSelector(
+    persist(
+      (set) => ({
     // Viewport state
     viewport: defaultViewport,
     setZoom: (zoom) =>
@@ -94,7 +95,16 @@ export const useMapStore = create<MapStore>()(
       set((state) => ({
         layersVisible: { ...state.layersVisible, [layer]: visible },
       })),
-  }))
+      }),
+      {
+        name: 'map-store',
+        partialize: (state) => ({
+          viewport: state.viewport,
+          layersVisible: state.layersVisible,
+        }),
+      }
+    )
+  )
 );
 
 // Selectors for efficient re-renders (Phase 10a.5)

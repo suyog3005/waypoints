@@ -1,6 +1,6 @@
 /**
  * Map Component Exports
- * 
+ *
  * Central location for importing map-related components
  * Files will be created in Phase 10a.3
  */

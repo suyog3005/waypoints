@@ -245,6 +245,7 @@ it can be tracked incrementally like every other phase.
 _Depends on Phases 5, 6 (Read Store), 9 (frontend tooling). This is a major new frontend feature building on the architectural patterns documented in [docs/MAP_VISUALIZATION_ARCHITECTURE.md](./MAP_VISUALIZATION_ARCHITECTURE.md)._
 
 **Rationale:** While Phase 9 provides a solid dashboard with CRUD pages, a production railway block-planning tool requires a map-based visualization showing:
+
 - Track network infrastructure (nodes, edges).
 - Real-time train positions on that network.
 - Blocks (track segments) occupied by trains.
@@ -259,6 +260,7 @@ This is based on patterns proven in [RIVM INFRA](https://gitlab.local.hacon.de/t
 _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md](../PHASE_10A_IMPLEMENTATION.md)._
 
 **Status: PHASE 10a.1 COMPLETE** (Infrastructure scaffolding done)
+
 - ✅ Phase 9C completion verified (all 7 tasks done)
 - ✅ Dependencies installed: maplibre-gl@5.24.0, zustand@4.5.7, dexie@4.4.2
 - ✅ Directory structure created: /stores, /components/map, /app/infrastructure/map
@@ -278,11 +280,12 @@ _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md
    - [x] Create `/frontend/stores/` directory with 3 stores ✅
    - [x] Verify build passes (15 routes, 0 errors) ✅
 
-2. **10a.2 State Management** (1 day)
-   - Create `stores/map.store.ts` (Zustand): zoom, center, extent, selectedTrainId, selectedRestrictionId, layersVisible (persisted to localStorage)
-   - Create `stores/tile.store.ts` (Zustand): visible tiles, tile version cache (UUID per tile ID), loading state
-   - Create `stores/time.store.ts` (Zustand): businessClock, timeOffset (minutes), customTime (date/time picker), customTimeEnabled
-   - Implement localStorage persistence for all three stores via Zustand middleware
+2. **✓ 10a.2 State Management** (1 day) — ✅ COMPLETE
+   - [x] `stores/map.store.ts` — viewport + layersVisible persisted to localStorage
+   - [x] `stores/tile.store.ts` — visible tiles, version cache, loading (no persistence — session state)
+   - [x] `stores/time.store.ts` — timeOffset + customTimeEnabled persisted to localStorage
+   - [x] Sidebar navigation updated with Map link (/infrastructure/map)
+   - [x] Build verified: 15 routes, 0 errors
 
 3. **10a.3 Core Components** (2 days)
    - **`MapContainer.tsx`**: Maplibre GL wrapper, renders nodes + edges from base graph, handles map events (zoom, pan, click)
@@ -294,7 +297,7 @@ _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md
 4. **10a.4 API Hooks & Utilities** (1.5 days)
    - **`hooks/useBaseGraph()`**: GET /basegraph, cache with staleTime=3600s (1 hour)
    - **`hooks/useTrainPositions(tiles, businessTime)`**: POST /trainpositions with tile versioning, refetch every 2 sec
-   - **`lib/tile-management.ts`**: 
+   - **`lib/tile-management.ts`**:
      - `calculateTileBoundaries(nodes, tileSize)` — compute global tile grid
      - `getVisibleTiles(mapExtent, tileBoundaries, timestamp)` — which tiles are in viewport
      - `roundToInterval(timestamp, intervalMinutes)` — quantize time to 15-min buckets

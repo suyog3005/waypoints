@@ -11,6 +11,7 @@ import {
   Bell,
   Settings,
   Train,
+  Map,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -20,6 +21,7 @@ const navItems = [
   { href: "/requests", label: "Block Requests", icon: FilePlus2 },
   { href: "/plans", label: "Plans", icon: CalendarRange },
   { href: "/network", label: "Track Network", icon: Network },
+  { href: "/infrastructure/map", label: "Map", icon: Map },
   { href: "/trains", label: "Trains", icon: TrainFront },
   { href: "/alerts", label: "Alerts", icon: Bell },
   { href: "/settings", label: "Settings", icon: Settings },

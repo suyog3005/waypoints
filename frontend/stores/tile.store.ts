@@ -1,6 +1,6 @@
 /**
  * Tile Store - Phase 10a.2
- * 
+ *
  * Tracks visible tiles and cached tile versions for delta transfer optimization
  * Will be populated in Phase 10a.5 (polling loop)
  */
@@ -36,11 +36,11 @@ export interface TileStore {
 
 /**
  * useTileStore - Tile visibility and caching state
- * 
+ *
  * Populated by:
  * - Phase 10a.5: Viewport change -> recalculate tiles -> update visibleTiles
  * - Phase 10a.5: API response -> update tileVersionCache
- * 
+ *
  * Used by:
  * - Phase 10a.5: Polling coordinator (reads visibleTiles, tileVersionCache)
  * - Phase 10a.6: Map layers (reads visibleTiles)
