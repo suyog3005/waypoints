@@ -386,6 +386,21 @@ when a phase's tasks are finished.
 
 - **Next Immediate Action** (10a.4): Create API hooks (useBaseGraph, useTrainPositions) + utilities (tile-management.ts, train-positioning.ts)
 
+### 2026-09-09 — Phase 10a.4 Complete (API Hooks + Tile Utilities)
+
+- **Phase 10a.4 Status**: ✅ COMPLETE
+  - **API Hooks** (`frontend/lib/hooks/`):
+    - `use-base-graph.ts`: `useBaseGraph()` — GET /basegraph, staleTime 1h, gcTime 6h, no refetch on focus. Returns `BaseGraphData`.
+    - `use-train-positions.ts`: `useTrainPositions({tiles, enabled})` — POST /trainpositions with tile versioning (delta transfer), refetchInterval 2s. Returns `TrainPositionsResponse` (positions + meta.dataTileVersions + meta.businessClock).
+  - **Utilities** (`frontend/lib/`):
+    - `tile-management.ts`: `roundToInterval` (15-min buckets), `positionToTile`, `getVisibleTiles` (viewport → tile IDs), `calculateTileBoundaries`, `parseTileId`. Constants: `DEFAULT_TILE_SIZE` (10 km), `TIME_BUCKET_MINUTES` (15).
+    - `train-positioning.ts`: `filterPositionsByTime`, `deriveBlocksFromPositions`, `interpolatePosition` (for smooth animation).
+  - **Hooks index updated**: re-exports `useBaseGraph`, `useTrainPositions`, `TrainPositionsResponse`.
+  - **Build Status**: ✅ 15 routes, 0 errors. Map page 287 kB, shared First Load JS 87.6 kB.
+  - **Note**: Hooks are created but not yet wired into MapContainer (deferred to 10a.5 polling coordinator). Tile version cache updates from response meta also deferred to 10a.5.
+
+- **Next Immediate Action** (10a.5): Wire map events → tile recalculation + polling coordinator (fetch visible tiles every 2s, merge into stores)
+
 ### 2026-09-09 — Phase 10a.1 Complete (Infrastructure Scaffolding)
 
 - **Phase 10a.1 Status**: ✅ COMPLETE

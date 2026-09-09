@@ -259,7 +259,7 @@ This is based on patterns proven in [RIVM INFRA](https://gitlab.local.hacon.de/t
 
 _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md](../PHASE_10A_IMPLEMENTATION.md)._
 
-**Status: PHASE 10a.3 COMPLETE** (Core map components built)
+**Status: PHASE 10a.4 COMPLETE** (API hooks + tile utilities)
 
 - ✅ Phase 9C completion verified (all 7 tasks done)
 - ✅ Dependencies installed: maplibre-gl@5.24.0, zustand@4.5.7, dexie@4.4.2
@@ -269,8 +269,9 @@ _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md
 - ✅ localStorage persistence added (map + time stores)
 - ✅ Sidebar navigation updated with Map link
 - ✅ 5 core map components built (MapContainer, TrainLayer, BlockLayer, TimeControls, MapSidebar)
+- ✅ API hooks built (useBaseGraph, useTrainPositions) + tile-management + train-positioning utilities
 - ✅ Build verified: 15 routes, 0 errors (map page 287 kB with Maplibre GL)
-- 🔄 Next: 10a.4 (API hooks + tile-management utilities)
+- 🔄 Next: 10a.5 (map events + polling coordinator)
 
 **10a Frontend Tasks** (8–9 days)
 
@@ -297,16 +298,12 @@ _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md
    - [x] **`TimeControls.tsx`**: Slider (−10 to +50 min, 5 s step), display time, reset-to-now button
    - [x] **`MapSidebar.tsx`**: Layer visibility toggles + train list (from useTrains)
 
-4. **10a.4 API Hooks & Utilities** (1.5 days)
-   - **`hooks/useBaseGraph()`**: GET /basegraph, cache with staleTime=3600s (1 hour)
-   - **`hooks/useTrainPositions(tiles, businessTime)`**: POST /trainpositions with tile versioning, refetch every 2 sec
-   - **`lib/tile-management.ts`**:
-     - `calculateTileBoundaries(nodes, tileSize)` — compute global tile grid
-     - `getVisibleTiles(mapExtent, tileBoundaries, timestamp)` — which tiles are in viewport
-     - `roundToInterval(timestamp, intervalMinutes)` — quantize time to 15-min buckets
-   - **`lib/train-positioning.ts`**:
-     - `filterPositionsByTime(allPositions, targetTime)` — keep positions valid at time T
-     - `deriveBlocksFromPositions(positions)` — map train X,Y to track segments
+4. **✓ 10a.4 API Hooks & Utilities** (1.5 days) — ✅ COMPLETE
+   - [x] **`hooks/useBaseGraph()`**: GET /basegraph, staleTime=1h, gcTime=6h
+   - [x] **`hooks/useTrainPositions(tiles)`**: POST /trainpositions with tile versioning, refetch every 2 sec
+   - [x] **`lib/tile-management.ts`**: `roundToInterval`, `positionToTile`, `getVisibleTiles`, `calculateTileBoundaries`, `parseTileId`
+   - [x] **`lib/train-positioning.ts`**: `filterPositionsByTime`, `deriveBlocksFromPositions`, `interpolatePosition`
+   - [x] Hooks index updated with new exports
 
 5. **10a.5 Map Events & Polling** (1.5 days)
    - Maplibre move/zoom event handlers → update viewport → trigger tile recalculation
