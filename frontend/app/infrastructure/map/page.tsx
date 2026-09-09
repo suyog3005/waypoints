@@ -11,7 +11,7 @@ import { MapContainer } from '@/components/map/MapContainer';
  */
 export default function MapPage() {
   return (
-    <div className="h-screen w-full bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
+    <div className="h-[calc(100vh-5.5rem)] w-full overflow-hidden rounded-lg bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
       <Suspense fallback={<MapLoading />}>
         <MapContainer />
       </Suspense>
@@ -21,7 +21,7 @@ export default function MapPage() {
 
 function MapLoading() {
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
+    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900">
       <div className="text-center">
         <div className="mb-4 h-12 w-12 animate-spin rounded-full border-4 border-slate-200 border-t-slate-900 dark:border-slate-800 dark:border-t-slate-50" />
         <p className="text-slate-600 dark:text-slate-400">Loading map…</p>

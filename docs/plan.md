@@ -259,7 +259,7 @@ This is based on patterns proven in [RIVM INFRA](https://gitlab.local.hacon.de/t
 
 _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md](../PHASE_10A_IMPLEMENTATION.md)._
 
-**Status: PHASE 10a.6 COMPLETE** (Map layers + rendering polish)
+**Status: PHASE 10a.7 COMPLETE** (Map integrated into app router)
 
 - ✅ Phase 9C completion verified (all 7 tasks done)
 - ✅ Dependencies installed: maplibre-gl@5.24.0, zustand@4.5.7, dexie@4.4.2
@@ -272,8 +272,9 @@ _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md
 - ✅ API hooks built (useBaseGraph, useTrainPositions) + tile-management + train-positioning utilities
 - ✅ Polling coordinator wired (usePollingCoordinator) + train/block layers render reactively
 - ✅ Layer polish: train clustering + count labels, popups, restriction overlay, glyphs source
+- ✅ Map integrated into app router (sidebar nav, topbar title, responsive shell layout)
 - ✅ Build verified: 15 routes, 0 errors (map page 278 kB with Maplibre GL)
-- 🔄 Next: 10a.7 (map integration into app router — verify nav, responsive layout)
+- 🔄 Next: 10a.8 (backend POST /trainpositions endpoint)
 
 **10a Frontend Tasks** (8–9 days)
 
@@ -323,11 +324,12 @@ _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md
    - [x] Cluster click → zoom in; train click → popup + store selection
    - [x] Glyphs source added for text layers; layer visibility toggles wired
 
-7. **10a.7 Map Integration into App** (0.5 days)
-   - Add `/infrastructure/map` route to app router
-   - Update sidebar navigation to include map link
-   - Ensure map page uses (shell) layout (sidebar + topbar)
-   - Verify responsive layout (map takes full remaining width/height)
+7. **✓ 10a.7 Map Integration into App** (0.5 days) — ✅ COMPLETE
+   - [x] `/infrastructure/map` route in app router
+   - [x] Sidebar navigation link (Map icon) — added in 10a.2
+   - [x] Topbar title "Infrastructure Map"
+   - [x] Map fits shell layout: `h-[calc(100vh-5.5rem)]` (topbar h-14 + main padding), rounded, overflow-hidden
+   - [x] Responsive: map fills remaining width/height within shell
 
 **10a Backend Tasks** (2 days)
 

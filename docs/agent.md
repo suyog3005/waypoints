@@ -438,6 +438,18 @@ when a phase's tasks are finished.
 
 - **Next Immediate Action** (10a.7): Verify map integration into app router — sidebar nav link, responsive layout, (shell) layout behavior
 
+### 2026-09-09 — Phase 10a.7 Complete (Map Integration into App Router)
+
+- **Phase 10a.7 Status**: ✅ COMPLETE
+  - **Route**: `/infrastructure/map` in app router (outside `(shell)` group, but root layout still wraps it with Sidebar + Topbar).
+  - **Sidebar Nav**: Map link (Map icon) — added in 10a.2, verified present.
+  - **Topbar Title**: Added "Infrastructure Map" to the titles map.
+  - **Layout Fix**: Map page height changed from `h-screen` (overflowed padded `<main>`) to `h-[calc(100vh-5.5rem)]` (topbar h-14 = 3.5rem + main padding 2×1rem = 2rem). Added `rounded-lg` + `overflow-hidden`. Loading fallback now uses `h-full`.
+  - **Build Status**: ✅ 15 routes, 0 errors. Map page 278 kB, shared First Load JS 87.6 kB.
+  - **Note**: Map is fully integrated into the app shell. Frontend Phase 10a (10a.1–10a.7) is now COMPLETE. Remaining: backend (10a.8–10a.9) + integration testing (10a.10).
+
+- **Next Immediate Action** (10a.8): Backend `POST /trainpositions` endpoint in Query Service (tile versioning + delta transfer)
+
 ### 2026-09-09 — Phase 10a.1 Complete (Infrastructure Scaffolding)
 
 - **Phase 10a.1 Status**: ✅ COMPLETE
