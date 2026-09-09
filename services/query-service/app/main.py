@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from app import config  # noqa: F401  (ensures READ_STORE_URL is set before db imports)
 from app.cache import Cache
 from app.config import settings
-from app.routers import blocks, plans, tracks, trains
+from app.routers import basegraph, blocks, plans, tracks, trains, train_positions
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -36,6 +36,8 @@ app.include_router(plans.router)
 app.include_router(blocks.router)
 app.include_router(tracks.router)
 app.include_router(trains.router)
+app.include_router(basegraph.router)
+app.include_router(train_positions.router)
 
 
 @app.get("/health")

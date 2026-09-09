@@ -33,3 +33,13 @@ async def get_tracks(request: Request) -> Response:
 @router.get("/trains")
 async def get_trains(request: Request) -> Response:
     return await forward(request, "GET", "/trains", base_url=settings.query_service_url)
+
+
+@router.get("/basegraph")
+async def get_basegraph(request: Request) -> Response:
+    return await forward(request, "GET", "/basegraph", base_url=settings.query_service_url)
+
+
+@router.post("/trainpositions")
+async def get_train_positions(request: Request) -> Response:
+    return await forward(request, "POST", "/trainpositions", base_url=settings.query_service_url)

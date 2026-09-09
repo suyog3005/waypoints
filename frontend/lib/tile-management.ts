@@ -10,8 +10,6 @@
  * Example: "125000_-10000_2026-08-31T09:15"
  */
 
-import { format } from 'date-fns';
-
 // ── Constants ──────────────────────────────────────────────────────────
 
 /** Default tile size in meters (10 km × 10 km). */
@@ -53,7 +51,11 @@ export function roundToInterval(timestamp: Date, intervalMin = TIME_BUCKET_MINUT
   const ms = timestamp.getTime();
   const intervalMs = intervalMin * 60_000;
   const bucketed = Math.floor(ms / intervalMs) * intervalMs;
-  return format(new Date(bucketed), 'yyyy-MM-ddTHH:mm');
+  // Format in UTC (via the ISO string) so the tile ID matches the backend's
+  // `time_bucket` (db/readstore/tiling.py), which also buckets and formats in
+  // UTC. date-fns v3 core `format` ignores `timeZone` (moved to @date-fns/tz),
+  // so we slice the UTC ISO string directly — no extra dependency.
+  return new Date(bucketed).toISOString().slice(0, 16);
 }
 
 /**

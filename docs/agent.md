@@ -285,7 +285,22 @@ Root: .gitignore, .editorconfig, pyproject.toml (shared ruff/black config)
   skeleton tables) built, full build verified (87.3 kB First Load JS). npm install
   fixed: added `--registry=https://registry.npmjs.org` to bypass slow/blocked Siemens
   Artifactory (configured in user `.npmrc`). Phases 9B (Core Read + Write Features)
-  and 9C (Visualization & Polish) remain unstarted.
+  and 9C (Visualization & Polish) DONE.
+- **Phase 10a (Map-based Railway Visualization): 10a.1–10a.9 DONE; 10a.10 pending.**
+  Frontend (10a.1–10a.7): Maplibre GL JS 5.24.0 map at `/infrastructure/map` with
+  3 Zustand stores (map/tile/time, `subscribeWithSelector` + `persist`), core
+  components (MapContainer, TrainLayer, BlockLayer, TimeControls, MapSidebar), API
+  hooks (useBaseGraph, useTrainPositions, usePollingCoordinator), tile utilities
+  (`lib/tile-management.ts`, `lib/train-positioning.ts`), train clustering + popups +
+  restriction overlay, time-travel slider. Build verified (15 routes, 0 errors).
+  Backend (10a.8–10a.9): Read Store projections `TrainPosition`/`BaseGraphNode`/
+  `BaseGraphEdge`/`DataTile` + migration `0002_map_projections.py`; shared
+  `db/readstore/tiling.py` (UTC time-bucketing, identical on write+read); ETL builds
+  positions/base-graph/data-tiles with version-bump-on-change (delta transfer);
+  Query Service `POST /trainpositions` (delta transfer, Redis TTL 10 s) +
+  `GET /basegraph` (Redis TTL 1 h); API Gateway proxy routes for both. Field names
+  aligned to frontend (`speed`, `trackId`) and time-bucketing made UTC-consistent.
+  **10a.10 (Integration Testing) pending** — needs live Read Store + Redis.
 
 Always check this section before assuming a phase is complete — update it immediately
 when a phase's tasks are finished.
@@ -351,6 +366,24 @@ when a phase's tasks are finished.
 ## 7. Change Log
 
 > Newest entries at the top. One entry per agent turn that changes the repo.
+
+### 2026-09-09 — Phase 10a.8 + 10a.9 Complete (Backend Map Endpoints + Tile Versioning)
+
+- **Phase 10a.8 Status**: ✅ COMPLETE — `POST /trainpositions` + `GET /basegraph` in Query Service
+- **Phase 10a.9 Status**: ✅ COMPLETE — tile version tracking in ETL (delta transfer)
+  - **Read Store models** (`db/readstore/models.py`): added `TrainPosition`, `BaseGraphNode`, `BaseGraphEdge`, `DataTile` (tile_id PK, version UUID, train_count, signature, last_updated).
+  - **Shared tiling module** (`db/readstore/tiling.py`, NEW): dependency-light `TILE_SIZE_M` (10 000), `TIME_BUCKET_MINUTES` (15), `time_bucket()`, `tile_id()`, `position_tile()`. Used by BOTH the ETL (write) and Query Service (read) so tile IDs are identical.
+  - **ETL** (`db/readstore/etl.py`): `_track_geometry()` (schematic grid: each track horizontal, 10 km, 2.5 km row spacing), `_build_train_positions()` (train at track midpoint per schedule window), `_build_base_graph()` (each track = edge between `{code}-A`/`{code}-B` nodes), `_build_data_tiles()`, `_sync_data_tiles()` (bumps version UUID only when train_count or signature changes; deletes stale tiles). `sync_read_store()` now writes all new projections.
+  - **Migration** (`db/readstore/migrations/versions/0002_map_projections.py`, NEW): hand-authored tables for the 4 new projections (no live Postgres to autogenerate).
+  - **Schemas** (`services/query-service/app/schemas.py`): `_CamelModel` base (to_camel alias generator, populate_by_name, from_attributes). `TrainPositionOut` (speed serialized as `speed` via validation_alias `speed_kmph`), `DataTileIn`, `TrainPositionsRequest`, `TrainPositionsMeta`, `TrainPositionsResponse`, `BaseGraphNodeOut`, `BaseGraphEdgeOut` (`from_` → wire `from`, `track_id` → `trackId`), `BaseGraphOut`.
+  - **Routers** (Query Service): `routers/train_positions.py` (POST /trainpositions — delta transfer: returns positions only for changed tiles + all latest versions; Redis TTL 10 s), `routers/basegraph.py` (GET /basegraph — Redis TTL 1 h). Both registered in `app/main.py`.
+  - **API Gateway** (`services/api-gateway/app/routers/reads.py`): added `GET /basegraph` + `POST /trainpositions` proxy routes (forward() passes POST body via `content=body`).
+  - **CRITICAL FIX — field-name alignment**: frontend `TrainPosition.speed` ↔ backend `speed_kmph` (now serialized as `speed`); frontend `BaseGraphEdge.trackId` ↔ backend `track_id` (now serialized as `trackId`). Verified via `model_dump(by_alias=True)`.
+  - **CRITICAL FIX — time-bucketing UTC consistency**: frontend `roundToInterval` now formats via `new Date(bucketed).toISOString().slice(0,16)` (UTC); backend `time_bucket()` now buckets + formats in UTC. Both produce identical tile IDs (verified: `12_-1_2026-08-31T09:15`). Previously the frontend bucketed on UTC epoch but formatted in local time, and the backend bucketed on local epoch — mismatched whenever the TZ offset wasn't a multiple of 15 min, which would have broken delta transfer.
+  - **Verification**: all Python files `py_compile` clean; Query Service + API Gateway import OK with `/basegraph` + `/trainpositions` registered (OpenAPI); ETL imports + `_track_geometry`/`_build_data_tiles` smoke test pass; Pydantic camelCase serialization confirmed.
+  - **Note**: Full E2E (live Postgres + Redis + running services) deferred to 10a.10 — no live DB in this environment.
+
+- **Next Immediate Action** (10a.10): Integration testing — stand up Read Store + Redis, run ETL, verify E2E map flow (base graph render, train positions, delta transfer, time-travel).
 
 ### 2026-09-09 — Phase 10a.2 Complete (State Management + localStorage)
 

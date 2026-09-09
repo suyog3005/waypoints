@@ -13,8 +13,9 @@ Projections (aligned with Phase 7's GET endpoints):
 """
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Index, Integer, String
+from sqlalchemy import Boolean, DateTime, Index, Integer, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -100,3 +101,98 @@ class TrainView(ReadStoreBase, SyncedMixin):
     train_type: Mapped[str | None] = mapped_column(String(50))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     schedule_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class TrainPosition(ReadStoreBase, SyncedMixin):
+    """One row per train per time window, with a schematic (x, y) position.
+
+    Populated by the ETL from ``train_schedules`` (a train is "on" a track
+    between ``scheduled_start`` and ``scheduled_end``). The (x, y) is a
+    schematic Cartesian coordinate derived from the track's segment endpoints
+    (see ``db.readstore.etl._track_geometry``) — not a geographic position.
+
+    Serves ``POST /trainpositions`` (Phase 10a.8).
+    """
+
+    __tablename__ = "train_position"
+    __table_args__ = (
+        Index("idx_train_position_time", "from_time", "to_time"),
+        Index("idx_train_position_track", "track_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default="gen_random_uuid()"
+    )
+    train_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    train_number: Mapped[str] = mapped_column(String(20), nullable=False)
+    track_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    track_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    # Schematic Cartesian position (meters).
+    x: Mapped[float] = mapped_column(nullable=False)
+    y: Mapped[float] = mapped_column(nullable=False)
+    speed_kmph: Mapped[int | None] = mapped_column(Integer)
+    # Validity window: the position is valid for from_time <= t <= to_time.
+    from_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    to_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class BaseGraphNode(ReadStoreBase, SyncedMixin):
+    """A node (station / junction / signal) in the schematic track network.
+
+    Serves ``GET /basegraph`` (Phase 10a.4 frontend hook).
+    """
+
+    __tablename__ = "base_graph_node"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default="gen_random_uuid()"
+    )
+    node_key: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    node_type: Mapped[str] = mapped_column(String(20), nullable=False)  # station/junction/signal
+    name: Mapped[str | None] = mapped_column(String(150))
+    x: Mapped[float] = mapped_column(nullable=False)
+    y: Mapped[float] = mapped_column(nullable=False)
+
+
+class BaseGraphEdge(ReadStoreBase, SyncedMixin):
+    """An edge (track segment) connecting two nodes in the schematic network.
+
+    Serves ``GET /basegraph`` (Phase 10a.4 frontend hook).
+    """
+
+    __tablename__ = "base_graph_edge"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default="gen_random_uuid()"
+    )
+    edge_key: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    from_node: Mapped[str] = mapped_column(String(50), nullable=False)
+    to_node: Mapped[str] = mapped_column(String(50), nullable=False)
+    track_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    track_code: Mapped[str | None] = mapped_column(String(50))
+
+
+class DataTile(ReadStoreBase):
+    """Tracks the version of each 3D data tile (x, y, time bucket).
+
+    The ETL bumps ``version`` (a fresh UUID) whenever the set of train
+    positions in a tile changes. The Query Service uses this to implement
+    *delta transfer*: the frontend sends the versions it already has, and the
+    server only returns positions for tiles whose version changed (Phase 10a.8).
+
+    No ``synced_at`` — freshness is captured by ``last_updated``.
+    """
+
+    __tablename__ = "data_tile"
+
+    tile_id: Mapped[str] = mapped_column(String(120), primary_key=True)
+    version: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, server_default="gen_random_uuid()"
+    )
+    train_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Sorted signature of the positions in this tile; used by the ETL to detect
+    # content changes and decide whether to bump ``version``.
+    signature: Mapped[str] = mapped_column(String(2000), nullable=False, default="")
+    last_updated: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )

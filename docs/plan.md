@@ -259,7 +259,7 @@ This is based on patterns proven in [RIVM INFRA](https://gitlab.local.hacon.de/t
 
 _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md](../PHASE_10A_IMPLEMENTATION.md)._
 
-**Status: PHASE 10a.7 COMPLETE** (Map integrated into app router)
+**Status: PHASE 10a.9 COMPLETE** (Backend map endpoints + tile versioning done; 10a.10 integration testing pending)
 
 - ✅ Phase 9C completion verified (all 7 tasks done)
 - ✅ Dependencies installed: maplibre-gl@5.24.0, zustand@4.5.7, dexie@4.4.2
@@ -274,7 +274,13 @@ _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md
 - ✅ Layer polish: train clustering + count labels, popups, restriction overlay, glyphs source
 - ✅ Map integrated into app router (sidebar nav, topbar title, responsive shell layout)
 - ✅ Build verified: 15 routes, 0 errors (map page 278 kB with Maplibre GL)
-- 🔄 Next: 10a.8 (backend POST /trainpositions endpoint)
+- ✅ Backend: Read Store projections (TrainPosition, BaseGraphNode, BaseGraphEdge, DataTile) + migration 0002
+- ✅ Backend: shared tiling module (db/readstore/tiling.py) — UTC time-bucketing, identical on write+read
+- ✅ Backend: ETL builds positions/base-graph/data-tiles with version-bump-on-change (delta transfer)
+- ✅ Backend: Query Service POST /trainpositions (delta transfer, Redis TTL 10s) + GET /basegraph (Redis TTL 1h)
+- ✅ Backend: API Gateway proxy routes for /basegraph + /trainpositions
+- ✅ Field names aligned to frontend (speed, trackId); time-bucketing made UTC-consistent
+- 🔄 Next: 10a.10 (integration testing — needs live Read Store + Redis)
 
 **10a Frontend Tasks** (8–9 days)
 
@@ -333,17 +339,20 @@ _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md
 
 **10a Backend Tasks** (2 days)
 
-8. **10a.8 `POST /trainpositions` Endpoint** (1 day)
-   - Add to Query Service (`query-service/app/routers/train_positions.py`)
-   - Accept `tiles: List[DataTile]` where `DataTile = {id: str, version?: UUID}`
-   - Return only positions where tile version has changed (delta transfer)
-   - Include `meta.dataTileVersions: Dict[tileId, newVersion]` in response
-   - Cache positive responses in Redis (TTL: 10 sec)
+8. **✓ 10a.8 `POST /trainpositions` Endpoint** (1 day) — ✅ COMPLETE
+   - [x] Add to Query Service (`query-service/app/routers/train_positions.py`)
+   - [x] Accept `tiles: List[DataTile]` where `DataTile = {id: str, version?: UUID}`
+   - [x] Return only positions where tile version has changed (delta transfer)
+   - [x] Include `meta.dataTileVersions: Dict[tileId, newVersion]` in response
+   - [x] Cache positive responses in Redis (TTL: 10 sec)
+   - [x] `GET /basegraph` router (Redis TTL 1h) + API Gateway proxy routes for both
+   - [x] Schemas aligned to frontend: `speed` (from `speed_kmph`), `trackId` (from `track_id`), `from` (from `from_`)
 
-9. **10a.9 Tile Version Tracking** (1 day)
-   - Create `data_tile` table in Read Store schema (id, version, last_updated, train_count)
-   - Update `db/readstore/etl.py` to bump tile version UUIDs when train positions change
-   - Implement efficient tile boundary calculation (given train position (x,y), which tiles does it belong to?)
+9. **✓ 10a.9 Tile Version Tracking** (1 day) — ✅ COMPLETE
+   - [x] Create `data_tile` table in Read Store schema (tile_id PK, version UUID, last_updated, train_count, signature) + migration 0002
+   - [x] Update `db/readstore/etl.py` to bump tile version UUIDs when train positions change (`_sync_data_tiles`)
+   - [x] Efficient tile boundary calculation via shared `db/readstore/tiling.py` (`position_tile`, `tile_id`, `time_bucket`)
+   - [x] Time-bucketing made UTC-consistent between frontend (`roundToInterval`) and backend (`time_bucket`)
 
 **10a Verification & Testing** (0.5 days)
 
