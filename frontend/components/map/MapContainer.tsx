@@ -302,21 +302,21 @@ function edgeFeatures(nodes: BaseGraphNode[], edges: BaseGraphEdge[]) {
     .map((e) => {
       const a = byId.get(e.from)!;
       const b = byId.get(e.to)!;
-      
+
       // Build coordinate array: start node + waypoints (if any) + end node.
       // This supports both straight edges (no waypoints) and curved edges (with waypoints).
       const coordinates: Array<[number, number]> = [
         [toLon(a.x), toLat(a.y)],
       ];
-      
+
       if (e.waypoints && e.waypoints.length > 0) {
         for (const wp of e.waypoints) {
           coordinates.push([toLon(wp.x), toLat(wp.y)]);
         }
       }
-      
+
       coordinates.push([toLon(b.x), toLat(b.y)]);
-      
+
       return {
         type: 'Feature' as const,
         properties: { id: e.id, trackId: e.trackId ?? '' },

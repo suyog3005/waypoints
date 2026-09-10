@@ -43,3 +43,16 @@ async def get_basegraph(request: Request) -> Response:
 @router.post("/trainpositions")
 async def get_train_positions(request: Request) -> Response:
     return await forward(request, "POST", "/trainpositions", base_url=settings.query_service_url)
+
+
+# Master data (departments, users) is served by the Command Service, which owns
+# the Operational DB. The block-request form uses these to resolve structured
+# identifiers (SR-003) instead of free text.
+@router.get("/departments")
+async def get_departments(request: Request) -> Response:
+    return await forward(request, "GET", "/departments", base_url=settings.command_service_url)
+
+
+@router.get("/users")
+async def get_users(request: Request) -> Response:
+    return await forward(request, "GET", "/users", base_url=settings.command_service_url)

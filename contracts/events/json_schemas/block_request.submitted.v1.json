@@ -63,7 +63,20 @@
         "is_emergency": { "type": "boolean", "default": false },
         "affected_track_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } },
         "technical": { "oneOf": [{ "$ref": "#/$defs/TechnicalRequestPayload" }, { "type": "null" }] },
-        "operational": { "oneOf": [{ "$ref": "#/$defs/OperationalRequestPayload" }, { "type": "null" }] }
+        "operational": { "oneOf": [{ "$ref": "#/$defs/OperationalRequestPayload" }, { "type": "null" }] },
+        "block_class": { "type": "string", "enum": ["routine", "corridor", "mega", "major_works", "project", "third_party", "short_micro", "emergency", "restoration", "security"], "default": "routine" },
+        "origin_type": { "type": "string", "enum": ["defect", "statutory", "condition_based", "project", "failure", "directive", "audit", "ad_hoc"], "default": "ad_hoc" },
+        "criticality": { "type": "string", "enum": ["safety_critical", "high", "medium", "low"], "default": "medium" },
+        "consequence_of_deferral": { "type": ["string", "null"] },
+        "work_type": { "type": ["string", "null"] },
+        "quantum": { "type": ["integer", "null"] },
+        "quantum_unit": { "type": ["string", "null"] },
+        "estimated_duration_minutes": { "type": ["integer", "null"] },
+        "suggested_duration_minutes": { "type": ["integer", "null"] },
+        "duration_confidence": { "type": ["string", "null"] },
+        "adjacent_line_status": { "type": ["string", "null"], "enum": ["open", "cautioned", "blocked", "physical_barrier", "lookout_posted", null] },
+        "is_late": { "type": "boolean", "default": false },
+        "lead_time_days": { "type": ["integer", "null"] }
       }
     }
   }

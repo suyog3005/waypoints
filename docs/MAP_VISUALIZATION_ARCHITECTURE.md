@@ -887,33 +887,34 @@ def generateCurvedEdgeGeometry(nodeA, nodeB, edgeId, masterSeed=12345):
     """Generate waypoints for a curved track between two nodes."""
     distance = euclidean(nodeA, nodeB)
     bearing = atan2(nodeB.y - nodeA.y, nodeB.x - nodeA.x)
-    
+
     numSegments = max(2, ceil(distance / 5000))
     waypoints = [nodeA]
-    
+
     edgeRng = Random(hash(edgeId) + masterSeed)
-    
+
     for i in range(1, numSegments):
         t = i / numSegments  # parameter [0, 1]
         midpoint = lerp(nodeA, nodeB, t)  # linear interpolation
-        
+
         # Perpendicular direction (rotated 90° from bearing)
         perpBearing = bearing + pi / 2
-        
+
         # Random deflection magnitude: ±8% of total distance
         deflectionMagnitude = edgeRng.uniform(-0.08 * distance, 0.08 * distance)
-        
+
         # Apply deflection perpendicular to the main bearing
         waypointX = midpoint.x + deflectionMagnitude * cos(perpBearing)
         waypointY = midpoint.y + deflectionMagnitude * sin(perpBearing)
-        
+
         waypoints.append(Point(waypointX, waypointY))
-    
+
     waypoints.append(nodeB)
     return waypoints  # LineString: [A, wp1, wp2, ..., B]
 ```
 
 This approach ensures:
+
 - **Deterministic reproducibility** — same edge ID + seed = same curve every time.
 - **Visual realism** — gentle organic curves that look like real railway alignment.
 - **Scalability** — fast O(segments) computation, no external geometry libraries required.

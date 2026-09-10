@@ -51,6 +51,21 @@
 - [Part L — Operations, Assurance and Rollout](#part-l--operations-assurance-and-rollout)
 - [Part M — Traceability: Scenario → Solution](#part-m--traceability-scenario--solution)
 - [Part N — Risks, Open Questions and Further Work](#part-n--risks-open-questions-and-further-work)
+- [Part O — Implementation Blueprint](#part-o--implementation-blueprint)
+  - [O0. How to read this Part](#o0-how-to-read-this-part) · scope, and what it does **not** repeat
+  - [O1–O3. Stance, stack, repository layout](#o1-implementation-stance)
+  - [O4–O5. Data layer and event contracts](#o4-data-layer-implementation)
+  - [O6–O9. Write path, rules, topology expansion, conflicts and impact](#o6-command-service--the-write-path)
+  - [O10–O13. Read path, gateway, ETL, real-time transport](#o10-query-service--the-read-path)
+  - [O14. Frontend implementation](#o14-frontend-implementation)
+  - [**O15. The Dynamic Map — implementation**](#o15-the-dynamic-map--implementation)
+  - [O16–O21. Field app, notifications, security, observability, testing, deployment](#o16-the-field-application)
+  - [O22. Delivery sequence](#o22-delivery-sequence)
+  - [**O23. What is needed from you — the requirements guide**](#o23-what-is-needed-from-you--the-requirements-guide)
+  - [O24–O26. Assumptions, the optimiser boundary, closing](#o24-assumptions-register)
+
+> **Note on Part O:** it deliberately contains **no optimisation-service implementation**.
+> The optimiser is treated as an external module behind a frozen interface ([O25](#o25-the-optimisation-service-boundary)).
 
 ---
 
@@ -4983,4 +4998,3046 @@ about its own most contested resource:
 
 ---
 
-_End of working paper._
+# Part O — Implementation Blueprint
+
+## _How this paper becomes running software (optimisation service excluded)_
+
+---
+
+## O0. How to read this Part
+
+### O0.1 Purpose
+
+Parts A–N described **what the railway needs and why**. Part O describes **how we build
+it**, on the stack that this repository has already committed to, in the order we will
+build it, with the concrete files, endpoints, schemas and acceptance gates for each piece.
+
+It is written for the person who has to open an editor tomorrow morning.
+
+### O0.2 Deliberate exclusion — the optimisation service
+
+**Nothing in Part O describes the optimisation service.** No solver, no objective
+function implementation, no ranked-plan generation, no bundling search, no
+`optimization-service` internals.
+
+That work is being deferred and will be authored separately. Part O therefore:
+
+- treats the optimiser as an **external module behind a frozen interface** (O25);
+- builds everything the optimiser will eventually need — truthful topology, structured
+  demand, actuals capture, conflict facts, impact inputs — **without building the
+  optimiser itself**;
+- makes every screen and API work in an **"advisory-off" mode**, so the product is
+  complete, demonstrable and useful before any optimisation exists.
+
+This is not a compromise. It is the sequencing argued for in [N4](#n4-closing-note):
+**truth first, then memory, then intelligence.**
+
+### O0.3 What this Part deliberately does NOT repeat
+
+To keep this document a *build guide* and not a third copy of the same material, the
+following live elsewhere and are **referenced, not restated**:
+
+| Already documented in                              | Covers                                                                        | Part O's relationship                                                            |
+| -------------------------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `docs/plan.md`                                     | Phase 0–15 delivery plan, confirmed stack decisions, backlog                  | Part O **adopts** the stack verbatim and adds the OPUS-5 delta as new phases      |
+| `docs/application_architecture_flow.md`            | Service decomposition, CQRS write/read split, event-driven loop                | Part O **assumes** it; only extensions are described                              |
+| `docs/database_schema.md`                          | Existing MVP tables                                                            | Part O lists **only the new/changed tables** OPUS-5 requires                      |
+| `docs/frontend-plan.md`                            | Next.js routes, design system, component inventory, forms strategy             | Part O adds **only the OPUS-5 screens and the map chapter**                       |
+| `docs/MAP_VISUALIZATION_ARCHITECTURE.md`           | 3D (X,Y,Time) tiling, delta transfer, base-graph endpoint, Maplibre choice     | Part O **builds on the tiling contract** and specifies the *dynamism and clarity* layer above it |
+| OPUS-5 [Part I](#part-i--architecture-and-system-flow) | Logical architecture, principal flows, API surface (indicative)           | Part O turns the indicative API into a **concrete, versioned endpoint catalogue**  |
+| OPUS-5 [Part J](#part-j--frontend-and-experience-design) | Screen designs, UX principles, field app                                | Part O gives the **component/file plan and state ownership** for those screens     |
+| OPUS-5 [Part K](#part-k--the-map)                  | Map visual grammar, view modes, layer semantics                                | Part O gives the **rendering implementation, LOD tables, label engine, perf budget** |
+
+> **Rule for contributors:** if a statement in Part O contradicts one of the documents
+> above, Part O wins for *implementation detail*; the referenced document wins for
+> *intent*. Raise the contradiction rather than silently choosing.
+
+### O0.4 Reading order for a new contributor
+
+```
+1. plan.md §1 (stack)                        — what we build with
+2. OPUS-5 Part C (problem) + Part F (design) — why it exists
+3. OPUS-5 Part O0–O3 (this Part, start)      — the shape of the codebase
+4. The chapter for your work package:
+      backend data      → O4, O5
+      write path        → O6, O7
+      derived facts     → O8, O9
+      read path         → O10, O11, O12, O13
+      frontend          → O14
+      the map           → O15   ← the largest chapter, read fully before touching the map
+      field app         → O16
+      platform          → O17–O21
+5. O22 (sequence) to find what is unblocked right now
+6. O23 if you are blocked on something only the product owner can answer
+```
+
+---
+
+## O1. Implementation stance
+
+### O1.1 Five stances that govern every decision below
+
+1. **Additive, never destructive.** The repository already runs end-to-end (Phases 0–12
+   of `plan.md`). OPUS-5 is implemented as *additive migrations, additive endpoints and
+   additive screens*. Nothing existing is deleted until its replacement is proven.
+2. **Truth before intelligence.** Topology fidelity, actuals capture and honest staleness
+   are built first because every later capability is worthless without them.
+3. **Deterministic before heuristic.** Everything that can be computed exactly — topology
+   expansion, overlap detection, capacity lookup, rule evaluation — is built now as plain
+   deterministic code. Only search/ranking is deferred to the optimiser.
+4. **Every screen works with zero optimiser.** If the optimiser never ships, the product
+   is still a coherent, useful, demonstrable system. The optimiser adds *ranking*, not
+   *function*.
+5. **The map is the product.** For this domain, the map is not a feature — it is the
+   primary comprehension surface for controllers, planners and management. It gets the
+   largest chapter, the strictest performance budget and the hardest acceptance tests.
+
+### O1.2 Honest inventory — what exists in the repository today
+
+| Area                | State                                                                                                | Verdict           |
+| ------------------- | ---------------------------------------------------------------------------------------------------- | ----------------- |
+| Monorepo scaffold   | `/services/{api-gateway,command-service,query-service,optimization-service}`, `/db`, `/contracts`, `/frontend`, `/infra` | **Keep**          |
+| Operational DB      | SQLAlchemy models + Alembic; org, network, planning, requests, events, identity                      | **Extend** (O4.1) |
+| Read Store          | Separate Postgres DB, four projections + map projections, own Alembic                                | **Extend** (O4.3) |
+| Contracts           | Envelope, typed payloads, topic map, JSON Schemas                                                    | **Extend** (O5)   |
+| Command Service     | `POST/PATCH /block-requests`, validation, Kafka publish                                              | **Extend** (O6)   |
+| Query Service       | `/plans /blocks /tracks /trains /basegraph /trainpositions`, Redis cache-aside                       | **Extend** (O10)  |
+| API Gateway         | Reverse proxy, correlation ID, stub auth, CORS                                                       | **Extend** (O11)  |
+| ETL                 | Polling full-refresh + tile version bumping                                                          | **Extend** (O12)  |
+| Frontend            | Next.js App Router, Tailwind + shadcn/ui, TanStack Query, Zustand, Maplibre map, time slider          | **Extend** (O14, O15) |
+| Optimisation service| Shadow finder + interval-union merge (MVP placeholder)                                               | **Frozen** (O25)  |
+
+### O1.3 The OPUS-5 gap register
+
+Everything OPUS-5 demands that does not exist yet, with its verdict. `BUILD` = in scope
+for Part O. `DEFER-OPT` = belongs to the optimisation service, out of scope here.
+`DEFER-P2` = a later phase, interface reserved now.
+
+| #   | Capability (OPUS-5 ref)                             | Verdict    | Where in Part O |
+| --- | --------------------------------------------------- | ---------- | --------------- |
+| G01 | Chainage-addressed extents (N2.1)                   | BUILD      | O4.1            |
+| G02 | Topology graph with turnouts/crossovers (M2)        | BUILD      | O4.1            |
+| G03 | Traction elementary-section graph (M2, G8)          | BUILD      | O4.1            |
+| G04 | Derived unavailability engine (H3)                  | BUILD      | O8              |
+| G05 | Full structured demand schema (Part G)              | BUILD      | O6.2            |
+| G06 | Entry-time validation catalogue V-01…V-24 (G18)     | BUILD      | O6.4            |
+| G07 | Demand lifecycle + SLA clocks (H1)                  | BUILD      | O6.5            |
+| G08 | Execution lifecycle with hard safety gates (H2)     | BUILD      | O6.6            |
+| G09 | Protection / disconnection / isolation registers    | BUILD      | O4.1, O6.7      |
+| G10 | Hand-back certificate + restriction register (H2)   | BUILD      | O6.8            |
+| G11 | Post-block actuals R.1–R.20 (G19)                   | BUILD      | O6.9            |
+| G12 | Resource model + readiness gate (H7)                | BUILD      | O4.1, O6.10     |
+| G13 | Competency register + grant gate (H-04)             | BUILD      | O4.1, O6.10     |
+| G14 | Rules engine, config-driven, cited (H10)            | BUILD      | O7              |
+| G15 | Conflict detection (H4) — deterministic             | BUILD      | O9.1            |
+| G16 | Impact engine L1 (capacity/detention arithmetic)    | BUILD      | O9.2            |
+| G17 | Impact engine L2/L3 (propagation, simulation)       | DEFER-P2   | O9.3            |
+| G18 | Shadow finder / bundling search (H5)                | DEFER-OPT  | O25             |
+| G19 | Objective function + ranked options (H8)            | DEFER-OPT  | O25             |
+| G20 | Explainability rendering (H9)                       | BUILD (shell) | O9.4, O15.11 |
+| G21 | Learning loop / duration model (H11)                | DEFER-OPT  | O25             |
+| G22 | Notification + acknowledgement fabric (I6)          | BUILD      | O17             |
+| G23 | Live block console (J8)                             | BUILD      | O14.6           |
+| G24 | Offline-first field PWA (J9)                        | BUILD      | O16             |
+| G25 | Dynamic, information-rich map (Part K)              | BUILD      | **O15**         |
+| G26 | Time travel past↔future on the map (K6)             | BUILD      | O15.8           |
+| G27 | Map-first demand drawing (K4.3)                     | BUILD      | O15.15          |
+| G28 | Train graph (time–distance) linked to map           | BUILD      | O15.17          |
+| G29 | RBAC + delegation (L1)                              | BUILD      | O18             |
+| G30 | Immutable audit + reconstruction (L3)               | BUILD      | O19.2           |
+| G31 | Degraded modes + printable artefacts (L5)           | BUILD      | O19.4           |
+| G32 | Multilingual UI (J11, S-90)                         | BUILD      | O14.9           |
+
+---
+
+## O2. Confirmed stack and the rules for using it
+
+### O2.1 The stack (adopted verbatim from `plan.md` §1)
+
+| Layer                | Technology                                              | Version pin        | Non-negotiable because                                       |
+| -------------------- | ------------------------------------------------------- | ------------------ | ------------------------------------------------------------ |
+| Language (backend)   | Python                                                  | 3.12               | Existing services; consistent tooling                        |
+| Web framework        | FastAPI + Uvicorn                                       | latest 0.1x        | Async, Pydantic-native, OpenAPI for free                     |
+| Validation/DTO       | Pydantic v2                                             | 2.x                | Shared with `/contracts`                                     |
+| ORM                  | SQLAlchemy 2.0 (declarative, typed)                     | 2.x                | Single source of truth for schema                            |
+| Migrations           | Alembic                                                 | 1.13+              | Versioned, reviewable, reversible                            |
+| Operational DB       | PostgreSQL                                              | 16                 | Transactions, JSONB, ranges, recursive CTEs                  |
+| Read Store           | PostgreSQL (separate database `block_planning_read`)     | 16                 | Read/write isolation per CQRS                                |
+| Broker               | Redpanda (Kafka API)                                    | latest             | Kafka semantics, no Zookeeper, light in Compose              |
+| Cache                | Redis                                                   | 7                  | Cache-aside, short TTL, pub/sub for SSE fan-out              |
+| Frontend framework   | Next.js (App Router) + React 18 + TypeScript (strict)   | 14/15              | Existing; RSC where useful, client islands for the map       |
+| Styling              | Tailwind CSS + shadcn/ui + lucide-react                 | current            | Existing design system                                       |
+| Server state         | TanStack Query v5                                       | 5.x                | Caching, polling, invalidation                               |
+| Client state         | Zustand                                                 | 4.x                | Map/time/tile stores already exist                           |
+| Map engine           | Maplibre GL JS                                          | 5.x                | Open, vector, GPU, no licence cost                           |
+| Local persistence    | Dexie (IndexedDB) + localStorage                        | 4.x                | Offline field app + base-graph cache                         |
+| Charts               | Recharts                                                | 2.x                | Already used for Gantt/KPIs                                  |
+| Forms                | react-hook-form + zod                                   | current            | Existing forms strategy                                      |
+| Container            | Docker + Docker Compose                                 | current            | One-command local stack                                      |
+| Lint/format          | ruff + black (py), eslint + prettier (ts)               | current            | Existing                                                     |
+
+**Additions Part O introduces** (small, justified, no new paradigm):
+
+| Addition                        | Purpose                                                              | Alternative rejected because                    |
+| ------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------- |
+| `networkx` (backend)            | Topology expansion (H3) — reachability, articulation, path search     | Hand-rolled BFS is fine but loses free algorithms |
+| `shapely` (backend)             | Chainage↔geometry interpolation, extent clipping for map geometry     | Manual linear referencing is error-prone        |
+| `sse-starlette` (backend)       | Server-Sent Events for live block console (O13)                       | WebSocket is heavier; polling is laggy          |
+| `@turf/turf` (frontend, subset) | `along`, `lineSlice`, `bearing` for train/worksite placement           | Reimplementing linear referencing on the client |
+| `next-intl` (frontend)          | Multilingual UI (S-90)                                                | Hand-rolled i18n loses pluralisation/format     |
+| `maplibre-gl-inspect`-style dev overlay (dev only) | Layer/feature debugging                            | —                                               |
+
+> No GIS server, no PostGIS requirement in the MVP. Geometry is stored as GeoJSON in
+> JSONB with a chainage index; PostGIS is a **future** upgrade recorded in O4.6, not a
+> prerequisite.
+
+### O2.2 Backend conventions (binding)
+
+```
+Module layout inside every service:
+  app/
+    main.py          — FastAPI app, lifespan, middleware wiring ONLY
+    config.py        — pydantic-settings; every env var declared with a default
+    db.py            — session dependency
+    cache.py         — Redis wrapper (best-effort; degrades to no-cache)
+    kafka.py         — publisher/consumer wrapper (best-effort; never blocks a request)
+    schemas.py       — API DTOs (never ORM models on the wire)
+    domain/          — pure functions, no I/O, unit-testable without a database
+    services/        — orchestration: domain + repositories + events
+    repositories/    — all SQL lives here; nothing else imports SQLAlchemy queries
+    routers/         — thin; parse → call service → serialise
+```
+
+Rules:
+
+1. **No business logic in routers.** A router is ≤ 20 lines.
+2. **No I/O in `domain/`.** Everything in `domain/` is a pure function taking plain data.
+   This is what makes topology expansion, conflict detection and rule evaluation testable.
+3. **Never return ORM objects.** Always a Pydantic response model.
+4. **All timestamps are timezone-aware UTC** at the boundary; local time is a *display*
+   concern only. Store `timestamptz`. This has already bitten the tiling code once.
+5. **Every write emits an event** through the transactional outbox (O5.4). No
+   fire-and-forget Kafka publish inside a request transaction.
+6. **Every mutating endpoint accepts `Idempotency-Key`** and is safe to retry.
+7. **Errors are structured**: `{code, message, field?, rule_id?, correlation_id}`. A
+   validation failure must name the rule that failed (V-nn) so the UI can explain it.
+8. **Nothing safety-relevant is inferred.** If a fact is unknown, it is `UNKNOWN`, and
+   `UNKNOWN` renders as unsafe. There is no defaulting to "probably fine".
+
+### O2.3 Frontend conventions (binding)
+
+1. **TypeScript strict.** `any` requires a comment naming the reason.
+2. **Server state → TanStack Query. Client state → Zustand.** Never duplicate server data
+   into Zustand; store *selection, viewport, filters, time offset* only.
+3. **One hook per resource** in `lib/hooks/use-*.ts`; components never call `fetch`.
+4. **Every list/detail screen implements four states**: loading (skeleton), empty
+   (`EmptyState`), error (`ErrorState` with retry + correlation id), stale
+   (`FreshnessIndicator`).
+5. **Colour is never the only signal.** Every semantic colour is paired with an icon,
+   pattern or label (accessibility + sunlight readability, S-90).
+6. **The map is a client island.** `'use client'`, dynamic import, `ssr: false`.
+7. **No layout shift on data refresh.** Polling must not cause the map or tables to jump.
+
+### O2.4 Naming conventions
+
+| Thing              | Convention                                | Example                                  |
+| ------------------ | ----------------------------------------- | ---------------------------------------- |
+| Table              | `snake_case`, singular                    | `block_demand`, `track_segment`          |
+| Column             | `snake_case`; times end `_at`; flags `is_`| `granted_at`, `is_emergency`             |
+| Enum values (DB)   | `UPPER_SNAKE`                             | `HANDBACK_CERTIFIED`                     |
+| Event type         | `domain.entity.past_tense`                | `block.demand.submitted`                 |
+| Kafka topic        | `dot.separated.plural`                    | `plan.commands`, `block.execution.events`|
+| REST path          | `kebab-case`, plural                      | `/block-demands/{id}/extension-requests` |
+| Rule id            | `V-nn` (validation), `H-nn` (hard), `S-nn` (soft) | `V-11`, `H-04`                    |
+| Map layer id       | `layer-domain-role`                       | `layer-block-fill`, `layer-train-label`  |
+| Map source id      | `src-domain`                              | `src-trains`, `src-blocks`               |
+| Zustand store      | `*.store.ts` exporting `use*Store`        | `map.store.ts` → `useMapStore`           |
+
+---
+
+## O3. Repository layout after this implementation
+
+Only **new or materially changed** paths are shown. Everything else stays as-is.
+
+```
+team-waypoints/
+├── contracts/
+│   └── events/
+│       ├── schemas.py                # + demand, execution, safety, notification payloads
+│       ├── events.py                 # + ~30 new event classes in EVENT_REGISTRY
+│       ├── topics.py                 # + block.execution.events, safety.events,
+│       │                             #   notification.commands, map.invalidation
+│       └── json_schemas/             # + one .json per new event
+│
+├── db/
+│   ├── models/
+│   │   ├── network.py                # + Node, TrackSegment, Turnout, Crossover,
+│   │   │                             #   LevelCrossing, Structure, Platform, Siding
+│   │   ├── traction.py               # NEW  TractionFeeder, ElementarySection, EarthPoint
+│   │   ├── signalling.py             # NEW  SignallingElement, Interlocking
+│   │   ├── demand.py                 # NEW  BlockDemand (full Part G schema), DemandLink
+│   │   ├── execution.py              # NEW  Block, WorkPackage, Worksite, ProtectionItem,
+│   │   │                             #      Disconnection, Isolation, HandbackCertificate
+│   │   ├── restriction.py            # NEW  Restriction, RestrictionReview
+│   │   ├── resource.py               # NEW  Machine, Gang, Person, Competency, Material,
+│   │   │                             #      Contractor, ResourceBooking
+│   │   ├── rules.py                  # NEW  Rule, RuleVersion, RuleFiring
+│   │   ├── governance.py             # NEW  Decision, ApprovalStep, Delegation, AuditRecord
+│   │   └── notification.py           # NEW  Notification, Recipient, Acknowledgement
+│   │
+│   ├── domain/                       # NEW — pure, importable by any service
+│   │   ├── chainage.py               #   linear referencing helpers
+│   │   ├── topology.py               #   H3 derived-unavailability engine
+│   │   ├── conflicts.py              #   H4 deterministic conflict detection
+│   │   ├── capacity.py               #   capacity profile selection
+│   │   ├── impact_l1.py              #   deterministic detention arithmetic
+│   │   ├── rules_engine.py           #   H10 evaluator
+│   │   └── lifecycle.py              #   H1/H2 state machines as data
+│   │
+│   ├── readstore/
+│   │   ├── models.py                 # + BlockView2, WorksiteView, RestrictionView,
+│   │   │                             #   ConflictView, DemandView, ResourceView,
+│   │   │                             #   NetworkGeometry, SectionCapacityView
+│   │   ├── tiling.py                 # + block/restriction tiling, multi-layer versions
+│   │   └── etl.py                    # + incremental sync, per-entity version bumps
+│   │
+│   └── migrations/versions/          # + 0003…00NN (one concern per migration)
+│
+├── services/
+│   ├── command-service/app/
+│   │   ├── domain/                   # NEW  validation, gates, state transitions
+│   │   ├── routers/
+│   │   │   ├── demands.py            # NEW  full Part G intake
+│   │   │   ├── execution.py          # NEW  grant/protect/start/extend/handback
+│   │   │   ├── safety.py             # NEW  disconnections, isolations, competency checks
+│   │   │   ├── resources.py          # NEW  bookings, readiness gate
+│   │   │   ├── restrictions.py       # NEW  register + review
+│   │   │   └── event_injection.py    # existing (demo/testing)
+│   │   └── outbox.py                 # NEW  transactional outbox + relay
+│   │
+│   ├── query-service/app/
+│   │   ├── routers/
+│   │   │   ├── map.py                # NEW  /map/snapshot, /map/tiles, /map/inspect/*
+│   │   │   ├── demands.py            # NEW  list/detail/timeline
+│   │   │   ├── conflicts.py          # NEW  conflict + derived-unavailability reads
+│   │   │   ├── restrictions.py       # NEW
+│   │   │   ├── resources.py          # NEW
+│   │   │   ├── traingraph.py         # NEW  time–distance series for the mini graph
+│   │   │   └── stream.py             # NEW  SSE fan-out from Redis pub/sub
+│   │   └── cache_keys.py             # NEW  single place defining every cache key + TTL
+│   │
+│   ├── api-gateway/app/
+│   │   ├── auth.py                   # NEW  JWT verify, role/scope extraction
+│   │   ├── rate_limit.py             # NEW  per-identity token bucket (Redis)
+│   │   └── routers/stream.py         # NEW  SSE passthrough (no buffering)
+│   │
+│   └── optimization-service/         # FROZEN — see O25. Do not modify in this work.
+│
+└── frontend/
+    ├── app/
+    │   ├── situation/                # NEW  the landing "situation" screen (J4)
+    │   ├── demands/                  # NEW  list, detail, wizard (map-first)
+    │   ├── console/                  # NEW  live block console (J8)
+    │   ├── field/                    # NEW  field PWA routes (J9)
+    │   └── infrastructure/map/       # EXTENDED — the dynamic map (O15)
+    │
+    ├── components/map/               # EXTENDED — see O15.21 for the full file plan
+    ├── components/inspector/         # NEW  progressive detail panel
+    ├── components/timeline/          # NEW  time slider + playback + train graph
+    ├── lib/map/                      # NEW  layer specs, style tokens, label engine
+    ├── lib/offline/                  # NEW  Dexie schema, queue, sync
+    └── stores/                       # + inspector.store.ts, filter.store.ts, playback.store.ts
+```
+
+---
+
+## O4. Data layer implementation
+
+### O4.1 Operational schema — new tables
+
+Only the **new** tables are specified. Column lists are indicative but the keys,
+constraints and index notes are binding, because they are what makes the map and the
+conflict engine fast enough.
+
+#### O4.1.1 Network / topology
+
+```
+node
+  id PK, code, name, node_type ENUM(STATION|JUNCTION|SIGNAL|LC|BRIDGE|NEUTRAL_SECTION|
+                                    BLOCK_HUT|YARD_ENTRY|SIDING_ENTRY|BOUNDARY)
+  section_id FK, lat, lon, chainage_m INT, is_block_station BOOL
+  attributes JSONB
+  INDEX (section_id, chainage_m)
+
+track_segment                                    -- THE atomic blockable unit
+  id PK, line_id FK, from_node_id FK, to_node_id FK
+  chainage_start_m INT, chainage_end_m INT       -- CHECK end > start
+  length_m INT GENERATED, geometry JSONB          -- GeoJSON LineString, WGS84
+  schematic_geometry JSONB                        -- pre-computed straightened variant
+  max_speed_kmph INT, gauge, is_electrified BOOL
+  direction ENUM(UP|DN|BIDIRECTIONAL)
+  confidence ENUM(VERIFIED|IMPORTED|ESTIMATED)    -- R1 mitigation, surfaced in the UI
+  INDEX (line_id, chainage_start_m), INDEX (from_node_id), INDEX (to_node_id)
+
+turnout      id PK, node_id FK, facing_segment_id FK, normal_segment_id FK,
+             reverse_segment_id FK, max_speed_reverse_kmph, is_motor_operated BOOL
+crossover    id PK, name, turnout_ids JSONB, line_a_id FK, line_b_id FK,
+             node_id FK, chainage_m
+level_crossing  id PK, segment_id FK, chainage_m, lc_type, road_class, is_manned
+structure       id PK, segment_id FK, chainage_from_m, chainage_to_m,
+                structure_type ENUM(MAJOR_BRIDGE|MINOR_BRIDGE|TUNNEL|ROB|RUB|CULVERT)
+platform        id PK, station_node_id FK, number, length_m, reachable_via JSONB
+siding          id PK, node_id FK, customer, capacity_wagons, reachable_via JSONB
+```
+
+#### O4.1.2 Traction graph (enables the *minimal isolation set*, G8 7.4)
+
+```
+traction_feeder      id PK, code, tss_node_id FK, phase, nominal_kv
+elementary_section   id PK, code, feeder_id FK,
+                     start_node_id FK, end_node_id FK,       -- SP/SSP boundaries
+                     covered_segment_ids JSONB,              -- denormalised for speed
+                     is_switchable_independently BOOL
+earth_point          id PK, elementary_section_id FK, node_id FK, chainage_m, type
+```
+
+> **Why denormalise `covered_segment_ids`:** the minimal-isolation computation runs on
+> every keystroke in the demand wizard. A JSONB array with a GIN index answers
+> "which elementary sections cover these segments?" in one query.
+
+#### O4.1.3 Signalling
+
+```
+signalling_element  id PK, element_type ENUM(SIGNAL|POINT_MACHINE|AXLE_COUNTER|
+                        TRACK_CIRCUIT|LC_GATE|BLOCK_INSTRUMENT|PANEL),
+                    node_id FK NULL, segment_id FK NULL, chainage_m,
+                    interlocking_id FK, identifier
+interlocking        id PK, station_node_id FK, type ENUM(RRI|PI|EI|SSI), commissioned_on
+```
+
+#### O4.1.4 Demand (the Part G schema, made physical)
+
+```
+block_demand
+  id PK, reference TEXT UNIQUE,                    -- human handle, e.g. BD-2026-004821
+  version INT NOT NULL DEFAULT 1,                  -- amendments create versions
+  supersedes_id FK NULL,
+  block_class ENUM(...F5...), status ENUM(...H1...),
+  department_id FK, unit_id FK, requester_id FK, sponsor_id FK NULL,
+  origin_type ENUM, origin_ref TEXT, programme_id FK NULL,
+  -- extent
+  from_node_id FK, to_node_id FK, line_ids JSONB, segment_ids JSONB,
+  chainage_from_m INT, chainage_to_m INT, direction ENUM,
+  occupancy ENUM(COMPLETE|PARTIAL_WIDTH|SLW),
+  adjacent_line_status ENUM(OPEN|CAUTIONED|BLOCKED|PHYSICALLY_SEPARATED|NOT_APPLICABLE),
+  adjacent_line_speed_kmph INT NULL,
+  -- work
+  work_category, work_type, description TEXT, quantum NUMERIC, quantum_unit,
+  method ENUM, criticality ENUM, deferral_consequence TEXT,
+  statutory_due_on DATE NULL, restriction_alternative JSONB,
+  weather_sensitivity ENUM, expected_output TEXT,
+  -- timing
+  preferred_start TIMESTAMPTZ, alt_windows JSONB, flexibility ENUM,
+  duration_total_min INT,
+  dur_protection_min INT, dur_work_min INT, dur_testing_min INT, dur_handback_min INT,
+  min_viable_min INT, is_divisible BOOL, latest_acceptable_on DATE NULL,
+  recurrence JSONB NULL,
+  -- safety / traction / s&t sub-documents (sparse, conditional sections)
+  protection JSONB, traction JSONB, signalling JSONB, resources JSONB,
+  commercial JSONB, attachments JSONB,
+  -- system-computed snapshots (recomputed, never trusted as input)
+  computed JSONB,                                  -- derived unavailability, conflicts, L1 impact
+  combinable BOOL NOT NULL DEFAULT TRUE,           -- G11 10.3
+  created_at, submitted_at, decided_at, sla_due_at
+  INDEX (status, preferred_start), INDEX GIN (segment_ids), INDEX (department_id, status)
+
+demand_link   id PK, from_demand_id FK, to_demand_id FK,
+              link_type ENUM(MUST_PRECEDE|MUST_FOLLOW|SIMULTANEOUS|MUTUALLY_EXCLUSIVE|
+                             DUPLICATE_OF|SUPERSEDES|BALANCE_OF)
+              -- acyclicity enforced in the service layer (V-09), tested by a recursive CTE
+```
+
+> **Why JSONB for the conditional sections:** G7–G12 are sparse — a P.Way demand has no
+> traction section. Fully normalising them creates a dozen near-empty tables. They are
+> validated by Pydantic on the way in (so they are *not* free-form) and indexed only where
+> queried. The **non-sparse, always-queried** fields stay as real columns.
+
+#### O4.1.5 Execution
+
+```
+block                       -- the sanctioned access event; one demand → 0..1 block,
+                            -- but one block ← many demands (bundling, later)
+  id PK, reference UNIQUE, block_class ENUM, status ENUM(...H2...),
+  planned_start TIMESTAMPTZ, planned_end TIMESTAMPTZ,
+  actual_grant_at, actual_start_at, actual_handback_at, actual_line_clear_at,
+  grant_delay_reason ENUM NULL, grant_delay_note TEXT,
+  segment_ids JSONB, chainage_from_m, chainage_to_m, occupancy ENUM,
+  traffic_state ENUM(NOT_REQUESTED|REQUESTED|GRANTED|SURRENDERED|RESTORED),
+  power_state   ENUM(NOT_REQUIRED|REQUESTED|ISOLATED|EARTHED|RESTORED),
+  adjacent_line_status ENUM,
+  nominated_person_id FK, controller_id FK, plan_id FK NULL,
+  created_at, closed_at
+  INDEX (status, planned_start), INDEX GIN (segment_ids)
+
+work_package  id PK, block_id FK, demand_id FK, party_id FK, status ENUM,
+              chainage_from_m, chainage_to_m, progress_pct INT, readiness JSONB
+worksite      id PK, work_package_id FK, chainage_m INT, lat, lon,
+              reported_at TIMESTAMPTZ, reported_by FK      -- rolling block front (S-35)
+protection_item  id PK, block_id FK, item ENUM(DETONATORS|BANNER_FLAG|HAND_SIGNAL|
+                     CLAMP_PADLOCK|STOP_BOARD|DISCONNECTION|LOOKOUT|POINT_CLAMP),
+                 position ENUM(APPROACH_UP|APPROACH_DN|SITE), required BOOL,
+                 confirmed_at, confirmed_by FK, photo_ref
+disconnection    id PK, block_id FK, signalling_element_id FK,
+                 disconnected_at, disconnected_by, reconnected_at, reconnected_by,
+                 notice_ref                                -- PAIRING ENFORCED (S-40)
+isolation        id PK, block_id FK, elementary_section_ids JSONB,
+                 requested_at, granted_at, earthed_at, earth_removed_at, restored_at,
+                 tpc_id FK, ptw_ref, authorised_person_id FK
+handback_certificate id PK, block_id FK, certifier_id FK, certified_at,
+                 fitness ENUM(FIT_NORMAL|FIT_WITH_RESTRICTION|NOT_FIT),
+                 restriction_id FK NULL, signature_ref, notes
+block_actuals    id PK, block_id FK, quantum_achieved, percent_complete,
+                 shortfall_reason ENUM, resource_issue ENUM, balance_demand_id FK NULL,
+                 reported_at, reported_by
+```
+
+#### O4.1.6 Restrictions (S-34 — first-class, aged, reviewed)
+
+```
+restriction  id PK, restriction_type ENUM(SPEED|BLOCKAGE|ADHESION|CAUTION|NO_STOPPING),
+             value_kmph INT NULL, segment_ids JSONB,
+             chainage_from_m, chainage_to_m, direction ENUM,
+             imposed_at, imposed_by FK, origin_block_id FK NULL, reason TEXT,
+             expected_relaxation_on DATE, review_due_on DATE, owner_id FK,
+             relaxed_at NULL, status ENUM(ACTIVE|RELAXED|SUPERSEDED),
+             INDEX (status, review_due_on), INDEX GIN (segment_ids)
+restriction_review  id PK, restriction_id FK, reviewed_at, reviewed_by, outcome, note
+```
+
+#### O4.1.7 Resources and competency
+
+```
+machine       id PK, code, machine_type ENUM(TAMPER|BCM|REGULATOR|TOWER_WAGON|RRV|CRANE|
+                  USFD|OMS|OTHER), home_base_node_id FK,
+              current_node_id FK, current_reported_at, mobilisation_model JSONB
+gang          id PK, code, unit_id FK, strength INT, base_node_id FK
+person        id PK, name, designation, department_id FK, phone, unit_id FK
+competency    id PK, person_id FK, competency_code, valid_from, valid_to, evidence_ref
+              INDEX (person_id, competency_code, valid_to)
+material      id PK, code, description, uom
+material_stock id PK, material_id FK, node_id FK, quantity, reserved_for_demand_id FK
+contractor    id PK, name, contract_ref, notice_period_hours, idle_charge_terms JSONB
+resource_booking id PK, resource_kind ENUM(MACHINE|GANG|PERSON|CONTRACTOR|MATERIAL),
+              resource_id UUID, demand_id FK NULL, block_id FK NULL,
+              from_at, to_at, includes_mobilisation BOOL,
+              status ENUM(TENTATIVE|CONFIRMED|RELEASED|CONSUMED)
+              EXCLUDE constraint on (resource_kind, resource_id, tstzrange(from_at,to_at))
+              WHERE status IN ('CONFIRMED')          -- DB-level double-booking prevention
+```
+
+> **The `EXCLUDE` constraint is the point.** S-19 (resource conflicts discovered on the
+> day) is eliminated at the database level, not by application politeness. Requires
+> `btree_gist`; the migration must `CREATE EXTENSION IF NOT EXISTS btree_gist`.
+
+#### O4.1.8 Rules, governance, notification
+
+```
+rule           id PK, code UNIQUE, family ENUM(SAFETY|CAPACITY|RESOURCE|ENVIRONMENT|
+                   PROCEDURAL|COMMERCIAL), severity ENUM(HARD|SOFT|WARN),
+               citation TEXT NOT NULL,               -- L1: no uncited rule may exist
+               is_active BOOL, scope JSONB
+rule_version   id PK, rule_id FK, version INT, expression JSONB, message_template TEXT,
+               effective_from, effective_to, approved_by FK, safety_approved_at
+rule_firing    id PK, rule_version_id FK, subject_type, subject_id, fired_at,
+               outcome ENUM(BLOCKED|WARNED|PASSED|OVERRIDDEN),
+               override_by FK NULL, override_reason TEXT
+decision       id PK, subject_type, subject_id, options JSONB, chosen JSONB,
+               decider_id FK, decided_at, justification TEXT, correlation_id
+approval_step  id PK, subject_type, subject_id, sequence INT, role_code,
+               assignee_id FK NULL, delegated_from FK NULL,
+               status ENUM(PENDING|APPROVED|REJECTED|ESCALATED|SKIPPED),
+               due_at, acted_at, comment
+delegation     id PK, from_person_id FK, to_person_id FK, role_code,
+               valid_from, valid_to, reason, created_by
+audit_record   id PK, actor_id, action, entity_type, entity_id,
+               before JSONB, after JSONB, at TIMESTAMPTZ, correlation_id, ip, user_agent
+               -- APPEND ONLY: revoke UPDATE/DELETE for the application role
+notification   id PK, event_type, subject_type, subject_id, payload JSONB,
+               created_at, priority ENUM(INFO|ACTION|URGENT|SAFETY)
+notification_recipient id PK, notification_id FK, person_id FK, role_code,
+               channel ENUM(IN_APP|PUSH|SMS|EMAIL|VOICE_FALLBACK),
+               sent_at, delivered_at, acknowledged_at, escalated_at
+```
+
+### O4.2 Migration strategy
+
+Rules for every Alembic revision in this work:
+
+1. **One concern per revision.** `0003_topology`, `0004_traction`, `0005_demand`,
+   `0006_execution`, `0007_restrictions`, `0008_resources`, `0009_rules_governance`,
+   `0010_notifications`. Never a "misc" migration.
+2. **Enums are created explicitly and referenced by name.** The duplicate `CREATE TYPE`
+   bug already found in Phase 10a came from letting SQLAlchemy auto-create enums twice.
+   Use `sa.Enum(..., name='...', create_type=False)` in the table and an explicit
+   `op.execute("CREATE TYPE ...")` guarded by `IF NOT EXISTS` logic.
+3. **Every revision has a working `downgrade()`.** Tested once in CI on a scratch DB.
+4. **Data backfill is a separate revision** from the DDL that enables it, so a failed
+   backfill does not block the schema.
+5. **No `NOT NULL` without a default on an existing table** — add nullable, backfill,
+   then tighten in a third revision.
+6. **`alembic check` runs in CI**; model drift fails the build.
+
+### O4.3 Read Store projections (map-first)
+
+The Read Store exists so the map and dashboards never touch the operational database. New
+projections, all denormalised, all carrying `synced_at` and a `version`:
+
+| Projection            | Grain                          | Feeds                                            |
+| --------------------- | ------------------------------ | ------------------------------------------------ |
+| `network_geometry`    | one row per track segment      | base graph, both geographic and schematic        |
+| `node_view`           | one row per node               | station labels, junction markers                 |
+| `block_view`          | one row per block              | map block layer, console, Gantt                  |
+| `block_extent_view`   | one row per (block, segment)   | **map rendering without a join** — the hot path  |
+| `worksite_view`       | one row per worksite report    | live work-front marker                           |
+| `restriction_view`    | one row per active restriction | restriction overlay, ageing dashboard            |
+| `demand_view`         | one row per demand             | demand lists, planning board, map "proposed" layer|
+| `conflict_view`       | one row per detected conflict  | conflict layer + conflict inbox                  |
+| `derived_unavail_view`| one row per (block, segment, reason) | "what else dies" shading                   |
+| `train_position`      | existing, extended             | train layer (+ delay, confidence, next stop)     |
+| `train_graph_series`  | one row per (train, time, chainage) | mini time–distance graph                    |
+| `section_capacity_view`| one row per (section, config) | capacity badge on the map and impact panel       |
+| `resource_view`       | one row per booking            | resource timeline, readiness panel               |
+| `kpi_daily`           | one row per (scope, date, kpi) | executive dashboard                              |
+
+Binding rules:
+
+- **No cross-database foreign keys.** IDs are carried as plain UUID columns.
+- **Every projection row carries `source_updated_at` and `synced_at`.** The UI shows the
+  older of the two as the freshness stamp. Honest staleness (F1.10) is a requirement.
+- **Projections are idempotent.** Re-running the ETL must produce byte-identical rows;
+  this is what makes the version-bump-on-change logic correct.
+
+### O4.4 The tiling and versioning contract (extended)
+
+The existing (X, Y, Time) tiling for train positions is proven. Part O generalises it so
+**every dynamic map layer** participates in delta transfer.
+
+```
+tile_id  =  "{layer}:{z}:{x}:{y}:{tbucket}"
+
+  layer    ∈ {trains, blocks, restrictions, worksites, conflicts}
+  z        = tiling zoom band (fixed set: 8, 11, 14) — NOT the map zoom
+  x, y     = tile indices at that band
+  tbucket  = UTC epoch minutes floored to the layer's time granularity
+             trains 15 min · blocks 60 min · restrictions 240 min ·
+             worksites 15 min · conflicts 60 min
+```
+
+`data_tile` table (Read Store) gains `layer` and `signature`:
+
+```
+data_tile
+  tile_id PK, layer, z, x, y, tbucket,
+  version UUID,            -- new UUID whenever signature changes
+  signature TEXT,          -- stable hash of the tile's serialised content
+  entity_count INT, last_updated TIMESTAMPTZ
+```
+
+Rules that were learned the hard way and must not be re-broken:
+
+1. **Time bucketing is UTC on both sides.** Frontend `roundToInterval` and backend
+   `time_bucket` must produce identical values for identical instants. There is a shared
+   test vector file for this (`db/readstore/testdata/tile_vectors.json`).
+2. **An entity spanning multiple buckets is written to every bucket it spans.** A block
+   from 22:00 to 02:00 appears in five 60-minute buckets. This was bug #2 of Phase 10a.
+3. **Delta responses are grouped by tile, never a flat list.** A flat list caused the
+   client to wipe unchanged tiles (bug #4). The response shape is:
+   ```json
+   {
+     "tiles": { "trains:11:1042:701:29234100": { "version": "…", "entities": [ … ] } },
+     "meta": { "businessClock": "…", "unchanged": ["trains:11:1042:702:29234100"] }
+   }
+   ```
+4. **`unchanged` is explicit.** The client must be told "this tile is still valid", not
+   left to infer it from absence.
+5. **Version bump is content-derived, not time-derived.** If nothing changed, the version
+   must not change, or delta transfer degenerates into full transfer.
+
+### O4.5 Seed and synthetic network requirements
+
+`db/network_gen.py` already generates a demo network. It must be extended to produce a
+network rich enough to *exercise the map*, because a 6-node network hides every clarity
+and density problem the map has.
+
+| Property                     | Minimum for demo | Minimum for load test |
+| ---------------------------- | ---------------- | --------------------- |
+| Stations                     | 24               | 200                   |
+| Track segments               | 300              | 4 000                 |
+| Turnouts / crossovers        | 60 / 20          | 600 / 200             |
+| Elementary sections          | 20               | 150                   |
+| Trains in a 24 h window      | 150              | 1 500                 |
+| Simultaneous live blocks     | 12               | 120                   |
+| Active restrictions          | 25               | 300                   |
+| Curved, organic geometry     | required         | required              |
+| Multi-line sections (2–4)    | required         | required              |
+| One cross-division boundary  | required         | required              |
+
+The generator must also emit **deliberately awkward cases**, because these are what the
+map has to survive:
+
+- two blocks whose extents overlap partially on the same line;
+- a block whose only crossover for SLW lies *inside* the worksite (makes SLW infeasible);
+- a station where six trains are within 300 m of each other (label collision);
+- a restriction 8 months past its review date (ageing visual);
+- a segment with `confidence = ESTIMATED` (must render differently);
+- a train with no position for 20 minutes (stale marker, not a hidden marker).
+
+### O4.6 Indexing, performance and the PostGIS question
+
+| Query                                          | Index                                              | Budget  |
+| ---------------------------------------------- | -------------------------------------------------- | ------- |
+| Segments in a viewport                         | `network_geometry(bbox_minx, bbox_miny, …)` btree   | < 30 ms |
+| Blocks overlapping a window                    | `block_view` GiST on `tstzrange(start, end)`        | < 30 ms |
+| Blocks on a segment                            | `block_extent_view(segment_id, start_at)`           | < 20 ms |
+| Demands overlapping extent+window (conflicts)  | GIN on `segment_ids` + GiST on range                | < 50 ms |
+| Tile fetch by ids                              | `data_tile(tile_id)` PK, batched `= ANY($1)`        | < 25 ms |
+| Train positions in tiles                       | `train_position(tile_id, at)`                       | < 40 ms |
+
+**PostGIS is not required for the MVP.** Segment geometry is GeoJSON in JSONB plus a
+pre-computed bounding box in four numeric columns, which answers every viewport query we
+have. PostGIS becomes worthwhile only when we need true spatial joins (e.g. "which
+demands are within 500 m of this point"), and that is recorded as a future upgrade with a
+clean migration path: add `geometry(LineString, 4326)`, backfill from JSONB, add GiST.
+
+---
+
+## O5. Contracts and events
+
+### O5.1 Envelope (unchanged, restated for completeness of the catalogue)
+
+Every event carries: `event_id`, `event_type`, `event_version`, `occurred_at`,
+`correlation_id`, `causation_id`, `actor`, `payload`. Consumers **must** ignore unknown
+payload fields (forward compatibility) and **must** be idempotent on `event_id`.
+
+### O5.2 New topics
+
+| Topic                     | Produced by      | Consumed by                          | Retention |
+| ------------------------- | ---------------- | ------------------------------------ | --------- |
+| `demand.events`           | Command          | ETL, Notification, (Optimiser later) | 7 d       |
+| `block.execution.events`  | Command          | ETL, Notification, SSE fan-out       | 7 d       |
+| `safety.events`           | Command          | ETL, Notification, Audit             | 90 d      |
+| `resource.events`         | Command          | ETL, Notification                    | 7 d       |
+| `restriction.events`      | Command          | ETL, Notification                    | 30 d      |
+| `notification.commands`   | Command, ETL     | Notification worker                  | 3 d       |
+| `map.invalidation`        | ETL              | Query Service (Redis pub/sub bridge) | 1 h       |
+| `plan.commands`           | existing         | Optimiser (frozen)                   | 7 d       |
+| `optimization.results`    | Optimiser        | ETL — **consumed but not produced by us** | 7 d  |
+
+### O5.3 New event catalogue
+
+| Event type                          | Emitted when                                   | Key payload                                  |
+| ----------------------------------- | ---------------------------------------------- | -------------------------------------------- |
+| `block.demand.drafted`              | draft saved                                    | demand_id, requester                         |
+| `block.demand.submitted`            | submitted for scrutiny                         | full demand snapshot, computed facts         |
+| `block.demand.amended`              | new version created                            | demand_id, version, diff                     |
+| `block.demand.withdrawn`            | requester withdraws                            | reason                                       |
+| `block.demand.validated`            | entry validation completed                     | V-rule outcomes                              |
+| `block.demand.conflict_detected`    | conflict engine finds a conflict               | conflict list with types                     |
+| `block.demand.approved` / `.rejected` | approval step completes                      | decider, justification                       |
+| `block.scheduled`                   | block object created from demand(s)            | block_id, window, extent                     |
+| `block.grant.requested`             | field/site requests the block on line          | block_id, requested_at                       |
+| `block.granted`                     | controller grants                              | granted_at, delay_reason                     |
+| `block.protection.item_confirmed`   | one checklist item confirmed                   | item, position, by, photo_ref                |
+| `block.protected`                   | all required protection confirmed              | protected_at                                 |
+| `block.isolation.requested/granted/earthed/restored` | power block progression      | elementary sections, TPC                     |
+| `block.work.started`                | work start declared                            | started_at, party count                      |
+| `block.worksite.moved`              | rolling front reported                         | chainage, lat/lon                            |
+| `block.progress.reported`           | progress % update                              | percent, note                                |
+| `block.extension.requested`         | extension asked from the field                 | requested_minutes, progress, reason          |
+| `block.extension.decided`           | controller approves/refuses                    | decision, impact snapshot                    |
+| `block.incident.reported`           | machine failure/injury/near-miss               | type, severity                               |
+| `block.work.completed`              | work declared complete                         | quantum achieved                             |
+| `block.handback.certified`          | certificate issued                             | certifier, fitness, restriction              |
+| `block.line_clear.restored`         | controller restores traffic                    | at                                           |
+| `block.closed`                      | post-block report complete                     | actuals                                      |
+| `block.surrendered`                 | sanctioned block not used                      | reason → triggers reserve-queue notification |
+| `restriction.imposed` / `.reviewed` / `.relaxed` | restriction register changes      | value, extent, review date                   |
+| `resource.booked` / `.released` / `.conflicted` | booking lifecycle                   | resource, window                             |
+| `readiness.gate.evaluated`          | T-24 h gate runs                               | pass/fail per criterion                      |
+| `safety.competency.rejected`        | grant blocked by invalid competency            | person, competency, expiry                   |
+| `disruption.declared` / `.cleared`  | mass disruption mode                           | scope, affected blocks                       |
+| `map.tiles.invalidated`             | ETL bumped tile versions                       | tile ids + layer                             |
+
+### O5.4 Transactional outbox (mandatory)
+
+The current best-effort publish can lose events if Kafka is unavailable mid-request. That
+is acceptable for a demo and unacceptable for a safety-adjacent record.
+
+```
+outbox_message
+  id PK, topic, key, payload JSONB, headers JSONB,
+  created_at, published_at NULL, attempts INT, last_error TEXT
+  INDEX (published_at) WHERE published_at IS NULL
+```
+
+Flow: the service writes the domain rows **and** the outbox row in one transaction; a
+relay task (async loop in the Command Service, or a small worker) polls unpublished rows,
+publishes, and marks them. Consequences:
+
+- A write either fully happens with its event, or not at all.
+- Kafka downtime degrades to latency, not data loss.
+- Replay is trivial: reset `published_at`.
+
+### O5.5 Versioning discipline
+
+- Additive payload fields → same `event_version`.
+- Removing/retyping a field → new `event_version`, both emitted for one release cycle.
+- JSON Schemas in `contracts/events/json_schemas/` are the contract; a CI test validates
+  every emitted example against its schema.
+
+---
+
+## O6. Command Service — the write path
+
+### O6.1 Responsibility boundary
+
+The Command Service owns **every state change** in the operational database. It does not
+read for display, does not compute rankings, and does not talk to the optimiser except by
+publishing events the optimiser may later consume.
+
+### O6.2 Endpoint catalogue
+
+Demand intake:
+
+| Method | Path                                        | Purpose                                   | Emits                        |
+| ------ | ------------------------------------------- | ----------------------------------------- | ---------------------------- |
+| POST   | `/demands`                                  | create draft                              | `block.demand.drafted`       |
+| PATCH  | `/demands/{id}`                             | edit draft (autosave)                     | —                            |
+| POST   | `/demands/{id}/validate`                    | run V-rules without submitting            | `block.demand.validated`     |
+| POST   | `/demands/{id}/submit`                      | submit for scrutiny                       | `.submitted`, `.conflict_detected` |
+| POST   | `/demands/{id}/amend`                       | create a new version of a submitted demand| `.amended`                   |
+| POST   | `/demands/{id}/withdraw`                    | withdraw                                  | `.withdrawn`                 |
+| POST   | `/demands/{id}/links`                       | add dependency/duplicate link             | —                            |
+| POST   | `/demands/emergency`                        | 7-field emergency path (G15)              | `.submitted` (priority)      |
+| POST   | `/demands/{id}/approvals/{step}/decide`     | approve/reject a step                     | `.approved` / `.rejected`    |
+| POST   | `/demands/{id}/attachments`                 | upload evidence                           | —                            |
+
+Execution (the live block console and the field app):
+
+| Method | Path                                          | Purpose                                    |
+| ------ | --------------------------------------------- | ------------------------------------------ |
+| POST   | `/blocks/{id}/grant-request`                  | site asks for the block on line            |
+| POST   | `/blocks/{id}/grant`                          | controller grants (reason code if late)    |
+| POST   | `/blocks/{id}/protection/{itemId}/confirm`    | confirm one protection item                |
+| POST   | `/blocks/{id}/isolation/request|grant|earth|restore` | power block progression             |
+| POST   | `/blocks/{id}/disconnections`                 | record disconnection                       |
+| POST   | `/blocks/{id}/disconnections/{id}/restore`    | record reconnection                        |
+| POST   | `/blocks/{id}/work/start`                     | declare work started (gated)               |
+| POST   | `/blocks/{id}/worksite`                       | report rolling front position              |
+| POST   | `/blocks/{id}/progress`                       | progress %                                 |
+| POST   | `/blocks/{id}/extension-requests`             | request extension (+ instant impact)       |
+| POST   | `/blocks/{id}/extension-requests/{id}/decide` | approve/refuse                             |
+| POST   | `/blocks/{id}/incidents`                      | incident/near-miss                         |
+| POST   | `/blocks/{id}/work/complete`                  | work complete + quantum                    |
+| POST   | `/blocks/{id}/handback`                       | certificate (certifier, fitness, TSR)      |
+| POST   | `/blocks/{id}/line-clear`                     | controller restores traffic                |
+| POST   | `/blocks/{id}/surrender`                      | block not used (reason)                    |
+| POST   | `/blocks/{id}/close`                          | post-block report R.1–R.20                 |
+
+Supporting:
+
+| Method | Path                                  | Purpose                                     |
+| ------ | ------------------------------------- | ------------------------------------------- |
+| POST   | `/restrictions`                       | impose (usually auto from handback)         |
+| POST   | `/restrictions/{id}/review`           | review outcome                              |
+| POST   | `/restrictions/{id}/relax`            | relax                                       |
+| POST   | `/resource-bookings`                  | book a machine/gang/person/material         |
+| DELETE | `/resource-bookings/{id}`             | release                                     |
+| POST   | `/readiness/{blockId}/evaluate`       | run the T-24 h gate on demand               |
+| POST   | `/disruptions`                        | declare mass disruption (bulk re-plan)      |
+| POST   | `/delegations`                        | time-bounded approval delegation            |
+
+### O6.3 Request/response shape rules
+
+- Request bodies mirror the Part G structure **section by section**, so the wizard can
+  `PATCH` one section at a time without sending the whole document.
+- Every response includes `computed` — the system's current answer (derived
+  unavailability, conflicts, L1 impact, rule outcomes). The wizard renders this live
+  (G14). This is the single highest-value feedback loop in the product.
+- `409 Conflict` is reserved for **state machine violations** and carries the current
+  state and the legal transitions. The UI uses this to disable the right buttons.
+
+### O6.4 The validation engine (V-01 … V-24)
+
+Implemented in `db/domain/rules_engine.py` + `command-service/app/domain/validation.py`
+as **pure functions over a `DemandContext`**:
+
+```python
+@dataclass(frozen=True)
+class DemandContext:
+    demand: DemandData            # the submitted document
+    network: NetworkSlice         # segments, turnouts, crossovers in/near the extent
+    traction: TractionSlice
+    calendars: CalendarSet        # embargo, peak, festival, statutory
+    bookings: list[BookingData]   # existing resource bookings in the window
+    competencies: list[CompetencyData]
+    neighbours: list[DemandData]  # open demands overlapping in space or time
+    history: DurationStats | None # from actuals; None when we have no history yet
+
+def validate(ctx: DemandContext) -> list[Finding]: ...
+
+@dataclass(frozen=True)
+class Finding:
+    rule_id: str        # "V-11"
+    severity: Literal["BLOCK", "WARN", "INFO"]
+    message: str        # already localised key + params
+    field_path: str | None   # "protection.lookout" → the UI focuses this field
+    citation: str       # the authority; never empty for BLOCK
+    fix_hint: str | None
+    data: dict          # what the UI needs to render the explanation
+```
+
+Mapping (every rule from G18 gets a home; none is dropped silently):
+
+| Rule | Implementation note |
+| ---- | ------------------- |
+| V-01 | chainage within section extent — pure arithmetic on `NetworkSlice` |
+| V-02 | line exists between stations — graph edge lookup |
+| V-03 | notice period from block class config; produces WARN + `is_late` flag or BLOCK |
+| V-04 | duration components sum — arithmetic |
+| V-05 | `min_viable_min ≤ duration_total_min` |
+| V-06 | competency validity on the block date — index lookup, expiry compared to `preferred_start` |
+| V-07 | SLW requires a usable crossover **outside** the worksite — graph query |
+| V-08 | earthing points must bound the worksite — traction graph query |
+| V-09 | dependency acyclicity — recursive CTE + in-memory check |
+| V-10 | embargo/peak calendar — interval intersection; override requires role + justification |
+| V-11 | adjacent line OPEN without lookout/warning → BLOCK |
+| V-12 | statutory due date before requested date |
+| V-13 | machine double booking — the DB `EXCLUDE` constraint is the backstop; this is the friendly pre-check |
+| V-14 | material unconfirmed → WARN now, BLOCK at the readiness gate |
+| V-15 | near-duplicate demand — same asset/segment overlap + similar work type within ±30 d |
+| V-16 | bundling candidate exists → WARN, must acknowledge. **Detection of overlap is deterministic and in scope; ranked bundling proposals are not (O25).** |
+| V-17 | duration deviates >30 % from history — skipped with INFO when `history is None` |
+| V-18 | adverse weather forecast for a weather-sensitive type |
+| V-19 | placeholder text detection — regex list, configurable |
+| V-20 | consecutive-night limit for the gang |
+| V-21 | contractual notice period breach |
+| V-22 | extent overlaps an approved block → WARN with "join this window" affordance |
+| V-23 | cross-divisional extent without coordination flag → WARN then BLOCK at approval |
+| V-24 | post-work restriction declared without extent/duration/review date |
+
+Testing: each rule gets a **table-driven test** with at least one passing and one failing
+fixture. This suite is the regression net for the whole write path.
+
+### O6.5 Demand lifecycle and SLA clocks
+
+The H1 lifecycle is expressed as **data**, not `if`-chains, in `db/domain/lifecycle.py`:
+
+```python
+DEMAND_TRANSITIONS: dict[Status, list[Transition]] = {
+  Status.DRAFT:      [T(to=SUBMITTED, action="submit", guards=["no_blocking_findings"],
+                        roles=["REQUESTER"])],
+  Status.SUBMITTED:  [T(to=UNDER_SCRUTINY, action="accept", roles=["PLANNER"]),
+                      T(to=RETURNED, action="return", roles=["PLANNER"],
+                        requires=["reason"])],
+  ...
+}
+```
+
+Benefits: the same table drives (a) the API guard, (b) the UI's enabled buttons via
+`GET /demands/{id}/transitions`, (c) the generated state diagram in the docs, (d) tests.
+
+SLA clocks are rows, not cron logic: each stage entry writes `sla_due_at`; a periodic
+sweeper emits `sla.breached` and creates the escalation approval step. Pausing rules
+(e.g. clock stops while returned to the requester) are configuration.
+
+### O6.6 Execution state machine and the hard gates
+
+The H2 gates are implemented as **guard functions that cannot be bypassed by any role**:
+
+```python
+def guard_work_start(block: Block) -> None:
+    if block.traffic_state != TrafficState.GRANTED:
+        raise Gate("H-G1", "Traffic block is not granted")
+    if not all_required_protection_confirmed(block):
+        raise Gate("H-G2", "Protection checklist incomplete")
+    if block.requires_power and block.power_state != PowerState.EARTHED:
+        raise Gate("H-G3", "OHE is not confirmed earthed")   # S-38
+    if not competency_valid(block.nominated_person_id, block.work_class, now()):
+        raise Gate("H-G4", "Nominated person competency invalid/expired")  # S-41
+```
+
+and:
+
+```python
+def guard_handback(block) -> None:
+    if open_disconnections(block):                      # S-40
+        raise Gate("H-G5", "Disconnections not restored")
+    if not certifier_competent(block):                  # S-33
+        raise Gate("H-G6", "Certifier competency invalid")
+```
+
+> There is **no override role** for H-G1…H-G6. An override facility on these gates would
+> convert the system from an aid into a hazard. If an exceptional situation arises, the
+> answer is the documented manual procedure, recorded afterwards — not a button.
+
+### O6.7 Protection, disconnection and isolation registers
+
+- Protection items are **generated from the work type + block class template** when the
+  block is created, so the field user sees a pre-built checklist, not a blank form.
+- Each confirmation captures `confirmed_at`, `confirmed_by`, optional photo, and
+  (if available) device GPS. Offline confirmations are queued with their **original**
+  timestamp and marked `recorded_late = true` on sync — never silently back-dated.
+- Disconnections enforce pairing at the database level with a partial unique index and at
+  the API level with the hand-back gate.
+- Isolation progression is strictly ordered: `REQUESTED → GRANTED → EARTHED → …`; skipping
+  a step is a `409` with the expected next step named.
+
+### O6.8 Hand-back and the restriction register
+
+`POST /blocks/{id}/handback` with `fitness = FIT_WITH_RESTRICTION` **must** carry a
+restriction sub-document (value, extent, direction, expected relaxation, review date,
+owner). The service creates the `restriction` row in the same transaction and emits
+`restriction.imposed`. This closes S-34 by construction: it is impossible to impose a
+restriction without a review date.
+
+A daily sweeper flags restrictions past `review_due_on`, emits notifications to the owner,
+and drives the ageing dashboard and the map's restriction styling (O15.13).
+
+### O6.9 Post-block actuals
+
+`POST /blocks/{id}/close` accepts R.1–R.20. Rules:
+
+- `quantum_achieved` and `percent_complete` are mandatory.
+- If `percent_complete < 100`, a **balance demand is auto-created as a draft**, pre-filled
+  from the parent, and linked with `BALANCE_OF` (S-32). The user only confirms it.
+- Blocks not closed within 48 h escalate to the department officer.
+- The record feeds `DurationStats` — which is *stored* now and *used by the optimiser
+  later*. Storing it is in scope; learning from it is not (O25).
+
+### O6.10 Resource booking and the readiness gate
+
+Booking is a first-class endpoint with the DB exclusion constraint as the backstop. The
+readiness gate is a scheduled evaluation at **T-24 h** (configurable per class) producing
+a structured result:
+
+| Criterion              | Source                                | Failure effect                |
+| ---------------------- | ------------------------------------- | ----------------------------- |
+| Resources confirmed    | `resource_booking.status = CONFIRMED`  | BLOCK (block goes AT_RISK)    |
+| Material at site       | explicit confirmation                  | BLOCK                         |
+| Competency valid       | competency register                    | BLOCK                         |
+| Weather acceptable     | forecast feed (or manual override)     | WARN                          |
+| Acknowledgements       | notification acknowledgement state     | WARN → escalate               |
+| Machine reachable      | mobilisation time vs current location  | WARN                          |
+
+A failed gate does not cancel the block; it marks it `AT_RISK`, notifies the owner and
+the controller, and surfaces it on the map and console with a distinct visual. Cancelling
+remains a human decision.
+
+---
+
+## O7. The rules engine
+
+### O7.1 Why it is a separate component
+
+Safety learning must become enforceable without a software release (S-44), and every
+enforced constraint must cite its authority (C4.5). That means rules are **data**.
+
+### O7.2 Rule representation
+
+```json
+{
+  "code": "H-11",
+  "family": "SAFETY",
+  "severity": "HARD",
+  "citation": "Enquiry recommendation 2024/17, para 6.3",
+  "scope": { "work_categories": ["OHE_STRUCTURES"], "divisions": ["*"] },
+  "expression": {
+    "all": [
+      { "field": "traction.power_block_required", "op": "eq", "value": true },
+      { "field": "adjacent_line_status", "op": "in", "value": ["OPEN"] }
+    ]
+  },
+  "outcome": "BLOCK",
+  "message_template": "OHE structure work with the adjacent line open requires {required}",
+  "effective_from": "2026-04-01"
+}
+```
+
+- **Expressions are a small, safe, whitelisted DSL** — `all`, `any`, `not`, and leaf
+  predicates over declared field paths. **No `eval`, no arbitrary code.** This is both a
+  security requirement (OWASP A03 injection) and an auditability requirement.
+- Field paths are validated against a published schema at rule-save time, so a typo fails
+  at authoring, not at 03:00 during a block.
+
+### O7.3 Evaluation and observability
+
+- The evaluator is pure and returns `Finding`s identical in shape to the V-rules, so the
+  UI has one rendering path for all constraint feedback.
+- Every evaluation writes a `rule_firing` row. This gives us "which rules actually fire,
+  how often, and how often are they overridden" — the input to periodic rule review, and
+  the answer to "show me all rules derived from enquiry X" (S-44).
+- Rules with `HARD` severity require a recorded safety approval before activation; the API
+  refuses to activate an unapproved hard rule.
+
+---
+
+## O8. Topology expansion — the derived unavailability engine
+
+### O8.1 Placement
+
+`db/domain/topology.py`. Pure, deterministic, no I/O. Called by the Command Service (to
+populate `computed` on a demand), by the Query Service (to answer map queries), and by the
+ETL (to build `derived_unavail_view`).
+
+> **This is not optimisation.** It is graph reachability. It is in scope.
+
+### O8.2 Interface
+
+```python
+def expand(blocked: set[SegmentId],
+           window: TimeWindow,
+           graph: NetworkGraph,
+           traction: TractionGraph,
+           signalling: SignallingIndex) -> Unavailability: ...
+
+@dataclass(frozen=True)
+class UnavailabilityItem:
+    segment_id: SegmentId
+    effect: Literal["BLOCKED", "STRANDED", "ROUTE_LIMITED",
+                    "ELECTRICALLY_DEAD", "DEGRADED_SIGNALLING", "CAPACITY_REDUCED"]
+    reason_code: str          # "ONLY_ACCESS_VIA_BLOCK", "TURNOUT_INSIDE_WORKSITE", …
+    explanation: str          # human sentence for the map tooltip
+    evidence: list[str]       # node/turnout ids that produced this conclusion
+    confidence: Literal["VERIFIED", "IMPORTED", "ESTIMATED"]
+```
+
+The `evidence` and `confidence` fields are not decoration: the map must be able to answer
+"*why* is this segment shaded?" and "*how sure* are you?" in one hover (H9, R1).
+
+### O8.3 Algorithm implementation notes
+
+Following H3's eleven steps, with the practical details that matter:
+
+1. **Direct** — trivial.
+2. **Stranded** — build the graph with blocked edges removed, then check reachability from
+   the set of *operational entry points* of the affected sections. `networkx` connected
+   components on the residual graph; anything in a component with no entry point is
+   stranded. Cache the graph per `(section, version)`; it changes rarely.
+3. **Turnout loss** — a turnout physically inside a blocked segment cannot be operated;
+   mark every route requiring it withdrawn. Routes are precomputed per interlocking.
+4. **Crossover loss for SLW** — the key check: for SLW between A and B, there must be a
+   usable crossover at or beyond each end, *outside* the blocked extent. If not, SLW is
+   infeasible and the section is COMPLETELY blocked. This single check prevents a very
+   expensive class of day-of surprise (S-13).
+5. **Platform / siding loss** — reachability from the platform/siding node.
+6. **LC effects** — geometric containment by chainage.
+7. **Traction** — map blocked segments to elementary sections; compute the minimal set
+   whose isolation covers the worksite plus statutory clearance; mark all segments under
+   those sections electrically dead.
+8. **Signalling** — disconnected elements → affected routes → degraded working method.
+9. **Capacity** — select the `CapacityProfile` per remaining segment for the window.
+10. **Neighbours** — repeat across a divisional boundary; flag coordination.
+
+Performance: the whole expansion for a typical extent must complete in **< 150 ms** so the
+demand wizard can call it on every meaningful edit. Achieved by (a) slicing the graph to
+the affected section plus one hop, (b) caching the section subgraph, (c) precomputing
+routes and elementary-section coverage.
+
+### O8.4 Honesty requirements
+
+- If any input segment has `confidence != VERIFIED`, every derived conclusion inherits the
+  lowest confidence in its evidence chain, and the UI must render it as provisional.
+- If the graph is disconnected because of *missing data* rather than the block, the engine
+  must say `DATA_INCOMPLETE` rather than `STRANDED`. Silently converting a data gap into
+  an operational conclusion is exactly the failure mode R1 warns about.
+
+---
+
+## O9. Conflicts and impact — what is in scope now
+
+### O9.1 Conflict detection (deterministic, in scope)
+
+`db/domain/conflicts.py`:
+
+```python
+def detect(subject: DemandOrBlock,
+           others: Iterable[DemandOrBlock],
+           bookings: Iterable[BookingData],
+           graph: NetworkGraph,
+           calendars: CalendarSet) -> list[Conflict]
+```
+
+Conflict types, each with a distinct visual on the map (O15.11):
+
+| Type                  | Test                                                                 |
+| --------------------- | -------------------------------------------------------------------- |
+| `SPATIO_TEMPORAL`     | segment sets intersect **and** time ranges intersect                 |
+| `ADJACENCY`           | extents are on adjacent lines with incompatible adjacent-line status |
+| `DERIVED`             | one demand's derived unavailability set hits another's extent        |
+| `RESOURCE`            | same resource, overlapping windows                                   |
+| `DEPENDENCY`          | ordering link violated by the proposed dates                         |
+| `CALENDAR`            | window intersects an embargo/peak/statutory constraint               |
+| `CAPACITY`            | offered traffic exceeds the capacity profile for the configuration   |
+| `CROSS_DIVISION`      | corridor-level clash across a boundary                               |
+
+Every conflict carries `severity`, `explanation`, `evidence`, and `suggested_actions`
+(e.g. "shift 90 min later", "join block B-1042"). **Suggestions here are simple,
+rule-derived hints — not search results.** Ranked alternatives are the optimiser's job.
+
+### O9.2 Impact — Level 1 only (in scope)
+
+`db/domain/impact_l1.py` computes, using the timetable and the capacity profile:
+
+- **Affected trains**: paths whose (segment, time) footprint intersects the block.
+- **Detention minutes**: for each affected train, `max(0, earliest_feasible_pass - booked_pass)`
+  under the applicable configuration (complete block → hold until hand-back; SLW → queue
+  through reduced capacity using a simple deterministic server model).
+- **Cancellations / diversions**: rule-based (a train held beyond `X` minutes with no path
+  is proposed for cancellation; a train with an alternative route is proposed for
+  diversion, validated against the block picture on that route — S-47).
+- **Freight tonnage delayed** and **indicative cost** via the configurable cost model.
+
+Every figure is returned with its **assumptions** attached:
+
+```json
+{ "value": 342, "unit": "train_minutes", "method": "L1_DETERMINISTIC",
+  "assumptions": ["capacity profile SLW_2TPH", "no propagation beyond section",
+                  "timetable snapshot 2026-09-10T18:00Z"],
+  "confidence": "MEDIUM" }
+```
+
+This is what makes the number defensible on the approval screen, and it is what stops a
+planner from over-trusting it.
+
+### O9.3 Impact Levels 2 and 3 (deferred, interface reserved)
+
+- **L2 (propagation via rake/crew links)** and **L3 (microscopic simulation)** are out of
+  scope for this work.
+- The response schema already carries `method` and `confidence`, so upgrading L1 → L2
+  changes a value and a label, not a contract.
+
+### O9.4 Explainability shell (in scope) vs ranked options (deferred)
+
+We build the **rendering and data contract** for explanations now:
+
+```json
+{ "subject": "demand:BD-2026-004821",
+  "binding_constraints": [ { "rule": "H-07", "text": "Peak window 07:00–11:00" } ],
+  "facts": [ { "label": "Affected trains", "value": 14, "drill": "…" } ],
+  "alternatives_considered": [],           // ← always empty until the optimiser exists
+  "what_would_change_it": [ "Start after 11:00", "Reduce extent to 412/1–412/4" ] }
+```
+
+The UI renders `alternatives_considered` as an explicit "no ranked alternatives available
+— optimiser not enabled" state rather than hiding the panel. When the optimiser arrives,
+the panel fills in with no frontend change.
+
+---
+
+## O10. Query Service — the read path
+
+### O10.1 Principles
+
+1. **Never touch the operational database.** Read Store only.
+2. **One endpoint per screen need**, not per table. A screen that needs five joins gets
+   one endpoint returning one shaped payload. Chatty frontends are the main cause of a
+   sluggish map.
+3. **Cache-aside with a single key registry.** All keys and TTLs live in
+   `cache_keys.py`; nothing constructs a key inline.
+4. **Every response carries freshness.** `meta.dataAsOf`, `meta.businessClock`,
+   `meta.degraded[]`.
+
+### O10.2 Endpoint catalogue (new)
+
+Map and situational:
+
+| Method | Path                          | Returns                                                        | TTL   |
+| ------ | ----------------------------- | -------------------------------------------------------------- | ----- |
+| GET    | `/basegraph`                  | nodes + segments + schematic geometry (existing, extended)     | 1 h   |
+| GET    | `/basegraph/version`          | cheap etag probe so clients avoid re-downloading               | 60 s  |
+| POST   | `/map/tiles`                  | multi-layer delta transfer (trains, blocks, restrictions, worksites, conflicts) | 5 s |
+| GET    | `/map/snapshot?at=…&bbox=…`   | one-shot full picture at an instant (used for print/degraded)  | 30 s  |
+| GET    | `/map/inspect/segment/{id}?at=…` | everything true about one segment at one instant             | 15 s  |
+| GET    | `/map/inspect/block/{id}`     | full block dossier for the inspector panel                     | 10 s  |
+| GET    | `/map/inspect/train/{id}?at=…`| train dossier: delay, next stops, blocks ahead, restrictions   | 5 s   |
+| GET    | `/traingraph?section=…&from=…&to=…` | time–distance series for the mini graph                  | 30 s  |
+| GET    | `/legend?layers=…`            | server-driven legend so colours never drift from data          | 1 h   |
+
+Domain reads:
+
+| Method | Path                                  | Notes                                      |
+| ------ | ------------------------------------- | ------------------------------------------ |
+| GET    | `/demands`                            | filters: status, dept, class, date, section, criticality |
+| GET    | `/demands/{id}`                       | full document + `computed` + timeline      |
+| GET    | `/demands/{id}/timeline`              | lifecycle events with actors               |
+| GET    | `/blocks`                             | existing, extended with execution state    |
+| GET    | `/blocks/{id}`                        | dossier incl. work packages and protection |
+| GET    | `/conflicts`                          | conflict inbox                             |
+| GET    | `/restrictions`                       | + `?overdue=true` for the ageing view      |
+| GET    | `/resources/timeline`                 | machine/gang itinerary (S-62 visibility)   |
+| GET    | `/readiness?date=…`                   | readiness board for the next 48 h          |
+| GET    | `/handover-pack?shift=…&section=…`    | auto-generated shift handover (S-82)       |
+| GET    | `/kpis?scope=…&period=…`              | dashboard series                           |
+| GET    | `/scorecards?dept=…`                  | claimed-vs-actual (S-92)                   |
+| GET    | `/audit?entity=…&at=…`                | reconstruction view                        |
+
+### O10.3 Cache key registry (shape)
+
+```python
+KEYS = {
+  "basegraph":        ("bg:v{ver}",                       3600),
+  "map_tiles":        ("mt:{layer}:{tile_id}",               5),
+  "map_snapshot":     ("ms:{bbox_hash}:{at_bucket}",        30),
+  "inspect_segment":  ("is:{segment_id}:{at_bucket}",       15),
+  "traingraph":       ("tg:{section}:{from}:{to}",          30),
+  "demand_list":      ("dl:{filter_hash}:{page}",           15),
+  "kpi":              ("kpi:{scope}:{period}",             300),
+}
+```
+
+Invalidation: the ETL publishes `map.invalidation` → a small bridge in the Query Service
+subscribes and deletes affected keys. **Never** rely solely on TTL for safety-relevant
+data such as block state; TTL is the backstop, invalidation is the mechanism.
+
+### O10.4 Degradation behaviour
+
+| Failure              | Behaviour                                                          |
+| -------------------- | ------------------------------------------------------------------ |
+| Redis down           | serve from Read Store, set `meta.degraded += ["cache"]`, log once   |
+| Read Store lagging   | serve, set `meta.dataAsOf` honestly; UI shows amber freshness       |
+| Read Store down      | `503` with `Retry-After`; the frontend falls back to its IndexedDB snapshot and marks the whole map STALE |
+| Tile missing         | return the tile as `null` with `reason: "NOT_BUILT"` — never an empty success, which the client would read as "nothing there" |
+
+That last row matters: **absence of data and emptiness of data must never look the same**
+on a safety-adjacent map.
+
+---
+
+## O11. API Gateway
+
+### O11.1 What it gains
+
+1. **Real authentication** replacing the stub: JWT (RS256) verification, `sub`, `roles`,
+   `scopes`, `division`, `department` claims extracted into a request context and
+   forwarded as signed internal headers.
+2. **Authorisation at the edge for coarse checks** (is this role allowed to call this
+   path at all); fine-grained checks stay in the services where the data lives.
+3. **Rate limiting** per identity via a Redis token bucket, with generous limits for
+   read endpoints and strict limits for write and auth endpoints.
+4. **SSE passthrough** with buffering disabled and correct headers.
+5. **Request/response size limits** and a strict CORS allow-list from config (the
+   permissive dev CORS must not reach any shared environment).
+6. **Correlation ID** (already present) plus `X-Request-Start` for latency attribution.
+
+### O11.2 Security checklist (OWASP-aligned, binding)
+
+| Risk                      | Control                                                                 |
+| ------------------------- | ----------------------------------------------------------------------- |
+| Broken access control     | Deny-by-default route table; every route declares required scopes        |
+| Injection                 | Parameterised SQL only; rule DSL is whitelisted, never `eval`            |
+| Insecure design           | Safety gates are non-overridable (O6.6); no auto-approval anywhere       |
+| Security misconfiguration | CORS/hosts/secrets from env; no defaults that are safe only in dev       |
+| Vulnerable components     | Pinned versions; dependency audit in CI                                  |
+| Auth failures             | Short-lived access tokens, refresh rotation, lockout on repeated failure |
+| Data integrity            | Outbox + append-only audit; signed internal headers between services     |
+| Logging failures          | Structured logs with correlation id; **never log tokens or PII payloads**|
+| SSRF                      | The gateway proxies only to a fixed, configured upstream list            |
+| File upload               | Type/size validation, virus scan hook, stored outside the web root, served via signed URLs |
+
+---
+
+## O12. ETL / projection pipeline
+
+### O12.1 From full-refresh to incremental
+
+The current polling ETL does a full refresh. That is fine at demo scale and quadratically
+wrong at network scale. Target design, still without Debezium:
+
+1. **Watermark per source table** (`max(updated_at)` seen), stored in a `etl_watermark`
+   table.
+2. Each cycle: select rows changed since the watermark, transform, upsert into the
+   projection, recompute the affected tiles' signatures, bump versions where the signature
+   changed, publish `map.invalidation` for those tiles.
+3. **Ordering**: network → traction → demands → blocks → worksites → restrictions →
+   conflicts → tiles → KPIs. A projection never reads another projection built later in
+   the same cycle.
+4. **Idempotent**: re-running a cycle produces identical output.
+5. **Cycle budget**: 2 s at demo scale, 10 s at load-test scale. If a cycle exceeds its
+   budget three times in a row, the ETL emits a degradation event that the UI surfaces as
+   an amber freshness state rather than silently lagging.
+
+### O12.2 Event-driven nudge
+
+The ETL additionally consumes `block.execution.events` and `safety.events` so that a
+grant, a hand-back or an earthing confirmation is projected within **≤ 1 s** rather than
+waiting for the next poll. Execution state is the one place where polling latency is
+operationally visible.
+
+### O12.3 Backfill and rebuild
+
+A `--rebuild [projection]` mode drops and rebuilds a single projection from scratch. This
+is the recovery procedure when a projection bug is found, and it is exercised in testing —
+an unrehearsed rebuild is not a recovery plan.
+
+---
+
+## O13. Real-time transport
+
+Three tiers, adopted in order, with a shared client abstraction so screens do not care
+which is active:
+
+| Tier | Mechanism                              | Used for                                        | Latency |
+| ---- | -------------------------------------- | ----------------------------------------------- | ------- |
+| 1    | TanStack Query polling (existing)      | lists, dashboards, map tiles                    | 2–15 s  |
+| 2    | **SSE** `GET /stream?topics=…&scope=…` | live block console, field app state, map deltas | < 1 s   |
+| 3    | WebSocket (future)                     | bidirectional needs (collaborative planning)    | < 1 s   |
+
+SSE implementation:
+
+- Query Service exposes `/stream`; the ETL/Command publish to Redis pub/sub channels; the
+  stream endpoint subscribes per client scope and forwards.
+- Event shape mirrors the Kafka envelope so the client has one decoder.
+- The client auto-reconnects with `Last-Event-ID`, and on reconnect **performs a full
+  re-sync of the affected scope** rather than assuming continuity.
+- **The map keeps polling as a safety net even when SSE is connected**, at a reduced rate
+  (every 30 s). A silent dead stream must not present a frozen picture as a live one — the
+  freshness indicator is driven by the *last successful data timestamp*, not by the socket
+  state.
+
+---
+
+## O14. Frontend implementation
+
+### O14.1 Route map (additions to `frontend-plan.md` §3)
+
+```
+/situation                    ← new landing: map + live blocks + alerts + handover
+/demands                      list, filters, saved views
+/demands/new                  map-first wizard (O14.4)
+/demands/[id]                 document + computed panel + timeline + decision record
+/planning                     planning board (calendar + conflicts + readiness)
+/console                      live block console (controller)
+/console/[blockId]            single block execution view
+/restrictions                 register + ageing
+/resources                    machine/gang timelines
+/network/[segmentId]          section dossier (survives transfers, S-87)
+/analytics                    KPIs, scorecards, backlog
+/field                        field PWA shell (separate, minimal chrome)
+/field/blocks/[id]            the safety screen (O16)
+/infrastructure/map           the dynamic map (O15)
+```
+
+### O14.2 State ownership matrix
+
+| State                         | Owner                | Persisted           |
+| ----------------------------- | -------------------- | ------------------- |
+| Server data (all)             | TanStack Query       | memory + IndexedDB for the base graph |
+| Map viewport                  | `map.store`          | localStorage        |
+| Layer visibility + filters    | `filter.store`       | localStorage + URL  |
+| Time offset / playback        | `time.store`, `playback.store` | localStorage (offset only) |
+| Tile versions                 | `tile.store`         | session only        |
+| Inspector selection + history  | `inspector.store`    | session             |
+| Wizard draft                  | server draft + RHF   | server (autosave)   |
+| Field queue (offline)         | Dexie                | IndexedDB           |
+
+**URL is state.** Viewport, time offset, layer filters and selection are reflected in the
+query string so a controller can paste a link into a message and the recipient sees
+*exactly* the same picture. This one decision removes an entire class of miscommunication.
+
+### O14.3 Data hooks
+
+One hook per resource, colocated types, all returning `{data, isLoading, isError, meta}`:
+
+```
+use-demands.ts          use-demand.ts           use-demand-transitions.ts
+use-blocks.ts           use-block.ts            use-block-stream.ts
+use-map-tiles.ts        use-base-graph.ts       use-map-inspect.ts
+use-train-graph.ts      use-conflicts.ts        use-restrictions.ts
+use-resources.ts        use-readiness.ts        use-handover-pack.ts
+use-kpis.ts             use-scorecards.ts       use-legend.ts
+```
+
+Conventions: `staleTime` matches the server TTL; `refetchInterval` only where the data is
+genuinely live; `placeholderData: keepPreviousData` everywhere a filter changes, so the
+map and tables never blank out.
+
+### O14.4 The map-first demand wizard
+
+Six-field open (G17), then progressive disclosure. Implementation notes:
+
+1. Step 1 is **the map**: the user draws the extent (O15.15). Chainage, line, segments,
+   division, LCs, structures and the derived unavailability are all computed and shown.
+2. The `computed` panel is **always visible on the right**, updating on every debounce
+   (400 ms). It shows: what else dies, who conflicts, affected trains, detention estimate,
+   rule findings. This is the single most important adoption feature — the requester sees
+   the consequence of their own ask before submitting.
+3. Conditional sections mount/unmount from a declarative config derived from G17, not from
+   nested JSX conditionals.
+4. Autosave to a server draft every 5 s and on blur; the wizard is resumable across
+   devices.
+5. Blocking findings disable submit and **focus the offending field** on click.
+
+### O14.5 The planning board
+
+Calendar/Gantt of demands and blocks with a conflict rail underneath, a readiness column
+and drag-to-reschedule that immediately re-runs conflict detection and L1 impact.
+Explicitly **no ranked suggestions** — the "Suggested plans" panel exists but renders the
+"optimiser not enabled" state (O9.4).
+
+### O14.6 The live block console
+
+Three panes: map (scoped to the section), block list ordered by urgency, and the selected
+block's execution timeline with the action buttons the controller's role permits.
+Extension requests arrive as a modal with the L1 impact pre-computed and a countdown.
+Every action requires one confirmation and records a reason where the model demands it.
+
+### O14.7 Accessibility, language and field ergonomics
+
+- All interactive elements keyboard reachable; the map has a keyboard mode (O15.19).
+- `next-intl` with English + Hindi + one regional language in the first release; safety
+  strings are translated first and reviewed by a native speaker.
+- Minimum 44 px touch targets on field screens; a high-contrast "sunlight" theme toggle.
+- Colour + icon + text for every state; verified against deuteranopia simulation.
+
+### O14.8 Performance budget (frontend)
+
+| Screen              | First contentful paint | Interaction latency | Bundle (route) |
+| ------------------- | ---------------------- | ------------------- | -------------- |
+| Situation           | < 1.5 s                | < 100 ms            | < 250 kB       |
+| Map                 | < 2.5 s                | < 16 ms per frame   | < 350 kB       |
+| Demand wizard       | < 1.5 s                | < 100 ms            | < 220 kB       |
+| Field block screen  | < 1.0 s (cached)       | < 100 ms            | < 120 kB       |
+
+### O14.9 Component additions
+
+`components/inspector/*` (progressive detail panel), `components/timeline/*` (time slider,
+playback, train graph), `components/explain/*` (constraint findings, evidence chips),
+`components/safety/*` (state pills for traffic/power/adjacent line, used identically on
+console, map and field app — one component, one truth).
+
+---
+
+## O15. The Dynamic Map — implementation
+
+> This is the largest chapter in Part O, deliberately. The map is how a controller,
+> a planner and a DRM each understand the same railway at the same moment. Part K defined
+> the *grammar*. `MAP_VISUALIZATION_ARCHITECTURE.md` defined the *transport* (tiling).
+> This chapter defines the **behaviour, legibility and code**.
+
+### O15.0 The two requirements this chapter must satisfy
+
+**Requirement 1 — the map must be much more dynamic.**
+It must feel like a living instrument, not a picture that occasionally refreshes.
+Concretely, "dynamic" is decomposed into twelve measurable behaviours (O15.1).
+
+**Requirement 2 — the information on the map must be much clearer.**
+More data must not mean more noise. Clarity is decomposed into a doctrine (O15.2), a
+level-of-detail contract (O15.3), a token system (O15.4) and a label engine (O15.5).
+
+These two requirements pull against each other. Everything in this chapter is the
+negotiated settlement between them.
+
+### O15.1 What "dynamic" means, concretely
+
+| #   | Behaviour                        | Definition of done                                                                                   |
+| --- | -------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| D1  | **Continuous motion**            | Trains move smoothly between position updates by interpolation at 60 fps — never teleport every 2 s.  |
+| D2  | **Live state, not stale paint**  | A grant, an earthing, a hand-back changes the map within 1 s (SSE) with an animated state transition. |
+| D3  | **Time travel**                  | Scrubbing the time slider re-renders the entire map at that instant, past or future, in < 200 ms.     |
+| D4  | **Playback**                     | Play/pause/×1/×5/×20/×60 animates the picture through a window; scrub-while-playing is supported.     |
+| D5  | **Viewport-reactive detail**     | Zoom and pan change *what is shown*, not just its size — a declared LOD contract (O15.3).             |
+| D6  | **Progressive inspection**       | Hover → 3 facts; click → 12 facts; expand → full dossier. No modal wall.                              |
+| D7  | **Direct manipulation**          | Extents can be drawn, dragged and trimmed on the map, with live recomputation of consequences.        |
+| D8  | **Reactive consequence**         | Changing anything (time, extent, filter) immediately restyles everything it affects — no "Apply".     |
+| D9  | **Focus and dimming**            | Selecting an entity dims unrelated data instead of hiding it; context is never lost.                  |
+| D10 | **Honest liveness**              | Every element carries an age; stale data visibly decays rather than lying.                            |
+| D11 | **Linked views**                 | Map ↔ train graph ↔ block list ↔ timeline all highlight the same entity simultaneously.               |
+| D12 | **Smooth under load**            | 1 500 trains, 120 blocks, 300 restrictions: pan/zoom stays ≥ 50 fps.                                  |
+
+### O15.2 The clarity doctrine
+
+Seven rules. They are enforced in review; a PR that breaks one is rejected.
+
+1. **Answer the four questions first.** At any moment, without clicking, the map must
+   answer: *Where is track unavailable? Which trains are affected? What is unsafe or
+   unknown? What is about to change?* Everything else is secondary and may be hidden.
+2. **One meaning per visual channel.**
+   - **Hue** = domain state (block, restriction, conflict, train).
+   - **Saturation/opacity** = certainty and recency.
+   - **Pattern (dash/hatch)** = provisional vs actual.
+   - **Stroke width** = importance/priority class.
+   - **Motion** = live change only.
+   Nothing else may be encoded. Two meanings on one channel is how maps become unreadable.
+3. **Never more than five simultaneous colour meanings in the viewport.** If a sixth is
+   needed, something must collapse into a summary badge.
+4. **Label budget.** At most 40 text labels on screen at once, priority-ranked (O15.5).
+   Above that, labels collapse into counts.
+5. **Nothing important is hover-only.** Hover reveals *detail*; it never reveals
+   *existence*. A safety-relevant fact is always visible without interaction.
+6. **Unknown is a state, and it is loud.** Grey-with-question-hatch, never "clean".
+7. **Every colour on the map is explained by the legend, and the legend is generated from
+   the same tokens the renderer uses** (`GET /legend`). Legend drift is a documented
+   failure mode; this makes it structurally impossible.
+
+### O15.3 Level-of-detail contract
+
+`lib/map/lod.ts` exports a single table. Layers read from it; no component invents its own
+zoom thresholds.
+
+| Zoom  | Scale sense       | Base network                        | Blocks                          | Trains                                   | Restrictions              | Labels                        |
+| ----- | ----------------- | ----------------------------------- | ------------------------------- | ---------------------------------------- | ------------------------- | ----------------------------- |
+| 4–7   | Zone / corridor   | corridors as single lines           | aggregated count badge per section | aggregated count per section          | count badge               | division names only           |
+| 8–10  | Division          | sections, major junctions           | one bar per block, no extent detail | clustered (radius 60 px)              | one marker per group      | station codes, major only     |
+| 11–12 | Section           | individual lines, stations          | true extent, state colour       | clustered (radius 45 px) + individuals   | true extent               | all stations, block refs      |
+| 13–14 | Station area      | + loops, platforms, crossovers      | + work packages, worksite front | individual, with direction chevrons      | + value labels            | + train numbers               |
+| 15–17 | Yard / worksite   | + turnouts, signals, LCs, structures| + protection markers, isolation | + speed/delay chips                      | + extent handles          | + chainage ticks, asset names |
+| 18+   | Engineering       | + chainage every 100 m, asset ids   | + per-item protection status    | + exact chainage                         | + review dates            | full detail                   |
+
+Rules:
+
+- **A layer must not simply "get bigger".** Each zoom band adds *information*, not size.
+- **Transitions are cross-faded over 150 ms**, never hard-switched, so the eye keeps
+  continuity.
+- **The count badge is clickable** at every aggregated level and zooms to fit the group.
+
+### O15.4 Semantic token system
+
+`lib/map/tokens.ts` is the single source of truth, imported by the renderer, the legend
+endpoint fixture, the inspector and the field app.
+
+| Token                      | Meaning                              | Light      | Dark       | Pattern        | Icon        |
+| -------------------------- | ------------------------------------ | ---------- | ---------- | -------------- | ----------- |
+| `track.available`          | normal, usable                       | slate-400  | slate-500  | solid          | —           |
+| `track.unverified`         | topology confidence ≠ VERIFIED       | slate-400  | slate-500  | fine dot       | `?`         |
+| `block.proposed`           | demand, not approved                 | violet-400 | violet-400 | dashed         | `pencil`    |
+| `block.approved`           | sanctioned, not yet live             | amber-500  | amber-400  | solid, hollow  | `calendar`  |
+| `block.live`               | granted and in force                 | amber-600  | amber-500  | solid, glowing | `shield`    |
+| `block.overrun`            | past sanctioned end                  | red-600    | red-500    | solid + pulse  | `alert`     |
+| `block.at_risk`            | readiness gate failed                | amber-600  | amber-500  | dashed + `!`   | `alert`     |
+| `block.handed_back`        | complete, awaiting close             | emerald-600| emerald-500| solid, thin    | `check`     |
+| `unavailable.derived`      | consequence of another block         | amber-300  | amber-700  | diagonal hatch | `link`      |
+| `power.isolated`           | OHE dead                             | sky-600    | sky-400    | double line    | `zap-off`   |
+| `power.earthed`            | dead **and** earthed                 | sky-700    | sky-300    | double + tick  | `zap-off`   |
+| `power.live_adjacent`      | live OHE next to a worksite          | red-600    | red-500    | double + bolt  | `zap`       |
+| `restriction.speed`        | TSR/PSR in force                     | orange-500 | orange-400 | dash-dot       | `gauge`     |
+| `restriction.overdue`      | past review date                     | orange-700 | orange-300 | dash-dot + `!` | `clock`     |
+| `conflict.hard`            | infeasible clash                     | red-600    | red-500    | zigzag         | `x-octagon` |
+| `conflict.soft`            | penalised clash                      | yellow-600 | yellow-400 | zigzag thin    | `alert`     |
+| `train.ontime`             | ≤ 5 min late                         | emerald-600| emerald-400| —              | chevron     |
+| `train.delayed`            | 6–30 min                             | amber-600  | amber-400  | —              | chevron     |
+| `train.severely_delayed`   | > 30 min                             | red-600    | red-400    | —              | chevron     |
+| `train.stale`              | no position for > 3 min              | slate-400  | slate-500  | 50 % opacity   | `wifi-off`  |
+| `train.projected`          | future/estimated position            | current hue| current hue| hollow outline | `dashed`    |
+| `state.unknown`            | any unknown safety fact              | zinc-500   | zinc-400   | question hatch | `help`      |
+
+**Binding rule:** no hex value appears anywhere in a component. Every colour reference is
+a token. This is what allows the theme, the sunlight mode and the colour-blind mode to be
+real rather than aspirational.
+
+### O15.5 The label engine
+
+Uncontrolled labels are the fastest way to ruin a dense railway map. Maplibre's collision
+detection is used, but it is not sufficient alone because it does not know what *matters*.
+
+`lib/map/labels.ts`:
+
+```ts
+type LabelPriority =
+  | 'safety'      // 100  live block, unknown state, overrun, live OHE adjacency
+  | 'selection'   //  90  the currently selected/hovered entity and its relations
+  | 'conflict'    //  80  conflicts in view
+  | 'operational' //  60  train numbers, block references
+  | 'context'     //  40  station names
+  | 'detail';     //  20  chainage ticks, asset ids
+```
+
+Implementation:
+
+1. Every text layer sets `symbol-sort-key` from the priority, so Maplibre drops low
+   priority labels first under collision.
+2. `text-allow-overlap: false`, `icon-allow-overlap: true` — the *marker* always survives,
+   only its *text* is dropped. Existence is never hidden (doctrine rule 5).
+3. When a label is dropped, its marker gains a subtle "has hidden label" affordance so the
+   user knows detail is available on hover.
+4. **Leader lines** for dense station areas: when ≥ 4 labels compete within 80 px, they
+   are stacked in a small callout box anchored to the cluster with a leader line, rather
+   than fighting for space.
+5. **A hard cap of 40 visible labels** is enforced by a post-render pass; beyond that,
+   `context` and `detail` tiers are suppressed and a "labels reduced" chip appears in the
+   map chrome with a one-click override.
+
+### O15.6 The inspector — progressive detail
+
+`components/inspector/` replaces ad-hoc popups. One panel, three depths, driven by
+`inspector.store`.
+
+| Depth       | Trigger        | Content                                                             | Latency |
+| ----------- | -------------- | ------------------------------------------------------------------- | ------- |
+| **Peek**    | hover / focus  | 3 facts max: identity, state, one number that matters               | instant (from tile data, no fetch) |
+| **Card**    | click          | ~12 facts + primary actions + "why" chip                            | < 150 ms (cached fetch) |
+| **Dossier** | expand / `→`   | full record: timeline, protection, resources, impact, audit, history | < 500 ms |
+
+Rules:
+
+- **Peek never fetches.** If the data is not already in the tile, the peek shows what it
+  has and says so. A hover that triggers a network request is a hover that feels broken.
+- The inspector is **stackable with breadcrumbs**: block → its work package → the machine
+  → the machine's next block. Back navigation preserves the map view.
+- Every fact that is *derived* carries a `?` chip opening the explanation (evidence chain
+  from O8.2 / O9.2). This is where H9 explainability actually lands for the user.
+- The inspector is **keyboard-first**: `↑↓` moves between entities in the current
+  selection set, `→` deepens, `←` returns, `Esc` clears.
+
+### O15.7 Hover, selection and focus
+
+Three distinct states, three distinct visuals, never conflated:
+
+| State       | Cause                     | Visual                                                        | Persistence   |
+| ----------- | ------------------------- | ------------------------------------------------------------- | ------------- |
+| **Hover**   | pointer / keyboard focus  | 1 px halo + peek                                              | transient     |
+| **Selected**| click                     | 2 px halo + card + URL updated                                | until cleared |
+| **Focused** | "focus" action on selected| everything unrelated dimmed to 25 % opacity; related highlighted | explicit toggle |
+
+**Focus mode is the clarity release valve.** When a controller focuses a block, the map
+dims every train not affected by it, every restriction not in its extent, and every other
+block — while keeping them faintly visible so the context is not lost (doctrine rule: dim,
+never hide). One keystroke (`F`) toggles it.
+
+Related-entity computation for focus is served by `GET /map/inspect/*`, which returns a
+`related` array of `{kind, id}` so the client can restyle without extra queries.
+
+### O15.8 Time: the slider, the clock and playback
+
+The existing time slider is extended into a full temporal controller.
+
+**Model** (`time.store` + `playback.store`):
+
+```ts
+interface TimeState {
+  mode: 'live' | 'custom';
+  businessClockAt: string;     // last server-confirmed "now"
+  offsetMs: number;            // custom offset from business clock
+  windowMs: number;            // visible window for the graph/gantt (default 4 h)
+}
+interface PlaybackState {
+  playing: boolean;
+  rate: 1 | 5 | 20 | 60;
+  fromAt: string; toAt: string;
+}
+```
+
+**Behaviours:**
+
+1. **Live mode** follows the server's business clock (never the browser clock — a wrong
+   laptop clock must not shift the railway).
+2. **Custom mode** is entered by dragging the slider or typing a time; the map header
+   changes colour and shows "VIEWING 14:35 (+22 min)" so nobody mistakes a forecast for
+   reality. This is a safety requirement, not a nicety.
+3. **Range**: −6 h to +12 h by default, configurable. Past is *recorded*; future is
+   *projected* and every projected element renders with the `train.projected` /
+   `block.approved` hollow style.
+4. **Scrubbing** is debounced at 80 ms for fetches but re-renders instantly from data
+   already in tiles, so dragging feels continuous even before new tiles arrive.
+5. **Playback** advances the display clock by `rate × wallclock`, requesting tiles ahead
+   of the playhead (pre-fetch 2 buckets). Pausing snaps to the current instant.
+6. **Keyboard**: `space` play/pause, `←/→` ±1 min, `shift+←/→` ±15 min, `home` back to
+   live.
+7. **The time control is shared** by the map, the Gantt and the train graph — one clock,
+   three views (D11).
+
+### O15.9 Train rendering
+
+**Position and motion (D1).** Positions arrive every 2 s. Between updates the client
+interpolates along the segment geometry using `@turf/along` with the reported speed and
+heading, capped so a train never overshoots the next reported point. On a correction, the
+marker **eases** to the true position over 300 ms rather than jumping — jumping reads as a
+data error to the user even when it is not.
+
+**Projected positions.** In future time, positions come from the timetable path, rendered
+hollow with a dashed halo, and the inspector labels them "projected from WTT, not
+observed".
+
+**Encoding, in priority order:**
+
+| Fact              | Channel                                     |
+| ----------------- | ------------------------------------------- |
+| Identity          | label (train number), priority `operational`|
+| Direction         | chevron rotation along the line             |
+| Delay             | hue (`train.*` tokens) + minutes chip ≥ z14 |
+| Position quality  | opacity + `wifi-off` icon when stale        |
+| Priority class    | stroke width (premium thicker)              |
+| Selection         | halo                                        |
+
+**Clustering.** Below z13, `cluster: true`, radius 45, with a count label. Cluster colour
+is the **worst** delay state in the cluster, not the average — the map must surface
+problems, not dilute them. Clicking a cluster zooms to its bounds; `alt+click` opens a
+list in the inspector without moving the map.
+
+**Density guard.** If more than 400 individual train symbols would render, the layer
+switches to clustered mode regardless of zoom and shows a chip: "clustered for legibility
+— zoom in or filter".
+
+### O15.10 Block rendering
+
+**Geometry.** A block is drawn along the *actual track geometry* for its chainage extent,
+using `lineSlice` over the segment geometries — never as a straight line between two
+points and never as a rectangle. A block that does not follow the rails is a block nobody
+trusts.
+
+**The visual grammar** (tokens from O15.4):
+
+```
+proposed      ── ── ──   violet dashed, thin, 60 % opacity
+approved      ─────────   amber hollow (outline only)
+live          ━━━━━━━━━   amber solid, 6 px, soft outer glow
+live+overrun  ━━━━━━━━━   red solid with a 1 Hz pulse (the ONLY pulsing element on the map)
+at risk       ━ ━ ━ ━ ━   amber dashed with a corner "!" badge
+handed back   ─────────   emerald thin
+derived unavail ╱╱╱╱╱╱   amber diagonal hatch at 35 % opacity
+```
+
+**Layered composition per block** (four Maplibre layers, in order):
+
+1. `layer-block-casing` — dark casing for contrast on any basemap.
+2. `layer-block-fill` — the state colour/pattern.
+3. `layer-block-endcaps` — perpendicular tick marks at each chainage limit, so the *extent
+   boundary* is unambiguous. (Without endcaps, users misread where a block stops — this
+   was a repeated finding in similar tools.)
+4. `layer-block-symbols` — state icon at the midpoint, work-package markers at z≥13,
+   protection markers at z≥15.
+
+**Work packages and the live front.** At z≥13, each work package renders as a sub-segment
+inside the block with its own progress fill (0–100 %). The reported worksite position
+(S-35) renders as a distinct chevron marker that **moves as reports arrive**, with a faint
+trail of its last three reported positions so the direction of progress is visible.
+
+**Countdown.** A live block shows remaining sanctioned time as a small ring around its
+midpoint icon at z≥13 — filling as it runs, turning red in the last 10 %, and continuing
+past 100 % into overrun. It is the single most-watched number in the control room and it
+should be visible without opening anything.
+
+### O15.11 Conflict and opportunity visualisation
+
+Conflicts are the reason the map exists. They must be impossible to miss and trivial to
+understand.
+
+**On the map:**
+
+- A conflict renders as a **zigzag overlay on the intersection extent only** — not on the
+  whole of either entity. The user must see *where* they clash, not merely *that* they do.
+- A **conflict badge** sits at the intersection midpoint showing the count when several
+  conflicts coincide.
+- Off-screen conflicts produce **edge indicators**: a small arrow on the viewport border
+  pointing toward the conflict, with distance. Clicking flies to it. Without this, a
+  controller can be unaware of a conflict simply because they panned away.
+
+**In the inspector**, a conflict card states, in this order:
+
+```
+WHAT   Demand BD-…4821 overlaps Block B-…1042 on UP Main, 412/3–412/7
+WHEN   Sunday 10:00–12:20 (2 h 20 m of overlap)
+WHY    Same segments, intersecting windows            [hard]
+COST   14 trains affected · ~342 train-minutes · SLW infeasible (no crossover outside)
+NEXT   • Shift demand to 12:30 (removes overlap)
+       • Join the existing window (extent already covered)
+       • Reduce extent to 412/3–412/5
+```
+
+`NEXT` items here are **deterministic, rule-derived hints**, and the panel says so:
+"suggestions are rule-based; ranked plan options require the optimiser (not enabled)".
+This keeps the promise of O9.4 honest and avoids implying intelligence we have not built.
+
+**Opportunity (bundling) hint.** Overlap *detection* is deterministic and in scope, so the
+map may show a "shared window possible" chip where two compatible demands sit close in
+space and time. It states the fact and stops there; it does not rank, cost-optimise or
+propose a merged plan. That is the optimiser's territory.
+
+### O15.12 Traction / power overlay
+
+Toggleable overlay, rendered **above** the track but **below** blocks:
+
+- Elementary sections drawn as a parallel double line offset 4 px above the track.
+- `power.isolated` and `power.earthed` are visually distinct — earthed adds a tick glyph
+  at each earth point. The difference between "switched off" and "proved dead and earthed"
+  is the difference between a safe worksite and a fatality (S-38), and the map must never
+  blur it.
+- When a block requires a power block and the OHE is **not** confirmed earthed, the block
+  renders with a `state.unknown` hatch overlay until earthing is confirmed. Unknown is
+  loud (doctrine rule 6).
+- Live OHE immediately adjacent to a worksite renders in `power.live_adjacent` with a bolt
+  glyph. This is one of the few things allowed to be visually aggressive.
+- Selecting a proposed isolation shows the **minimal isolation set** computed in O8.3,
+  with everything that goes dead shaded, plus a count: "isolating 2 elementary sections →
+  4 stations dark, 11 km of OHE".
+
+### O15.13 Restriction overlay
+
+- Rendered as a dash-dot line offset 4 px *below* the track (mirroring traction above), so
+  three concerns can coexist on one corridor without overlapping strokes.
+- Speed value labelled at z≥13 with a small speed-plate glyph.
+- **Ageing is encoded**: as a restriction passes its review date, its hue shifts toward
+  `restriction.overdue` and it gains a clock glyph. A restriction eight months overdue
+  looks visibly wrong on the map. Making decay visible is how S-34 stops recurring.
+- The restriction layer has its own filter chip: `all / active / overdue / imposed by this
+  block`.
+
+### O15.14 Derived unavailability visualisation
+
+The output of O8 is one of the highest-value things the map can show, and one of the
+easiest to render confusingly.
+
+- Rendered as **diagonal hatch** (never a solid fill, which would be mistaken for a block).
+- **Only shown when a block or demand is selected or hovered**, because it is a
+  *consequence of something*, and showing consequences without their causes is noise.
+- Each hatched segment's peek states the reason in one sentence:
+  "Unusable: only access is via the blocked UP Main between 412/3 and 412/7."
+- Confidence is respected: an `ESTIMATED` conclusion renders at lower opacity with a `?`
+  and the peek says "provisional — topology unverified".
+
+### O15.15 Drawing and editing extents on the map
+
+Direct manipulation (D7), implemented in `components/map/ExtentDrawTool.tsx`.
+
+**Draw flow:**
+
+1. User picks a line (click) → the line highlights and chainage ticks appear.
+2. Click sets the start; move shows a live extent with a floating readout
+   `412/300 → 414/750 · 2.45 km`; click sets the end.
+3. The extent **snaps** to meaningful features within 25 px: node, turnout, crossover,
+   signal, structure, LC, existing block boundary. Snapping is what makes drawn extents
+   operationally sane rather than arbitrary.
+4. On release, the client calls the wizard's compute endpoint and the map immediately
+   shows derived unavailability, conflicts and affected trains **on the map itself**, not
+   only in a side panel.
+
+**Edit flow:** a selected extent shows draggable endcap handles and a whole-extent drag.
+Every drag re-runs the computation on a 300 ms debounce. An edit that introduces a hard
+rule violation snaps back with an inline explanation naming the rule.
+
+**Guard rails:** extents cannot be drawn across a division boundary without an explicit
+confirmation (V-23), cannot be zero-length, and cannot span discontinuous geometry.
+
+### O15.16 Geographic ↔ schematic morph
+
+Both view modes are supported (Part K1). Implementation:
+
+- Every segment carries **two geometries** (`geometry`, `schematic_geometry`), the second
+  precomputed by the ETL using a straightening pass.
+- Switching modes **animates between them over 600 ms** with `easeInOutCubic` on the
+  coordinate arrays. Morphing rather than swapping preserves the user's mental map — a
+  hard swap forces re-orientation every time and users stop switching.
+- All overlays are recomputed against the active geometry; nothing is positioned in
+  absolute pixels.
+- Mode is per-user, persisted, and reflected in the URL.
+
+### O15.17 The linked train graph (time–distance)
+
+A collapsible bottom panel (30 % height) showing the classic controller's graph: chainage
+on Y, time on X, train paths as lines, blocks as shaded horizontal bands.
+
+- **Linked selection**: hovering a train on the map highlights its line in the graph and
+  vice versa (D11).
+- The **time slider's playhead** is a vertical line on the graph; dragging either moves
+  both.
+- Blocks appear as bands so a planner can see, in one glance, which paths pass through the
+  proposed window — the exact judgement the approval screen requires.
+- Rendered with Recharts for axes and a custom canvas layer for the paths (hundreds of
+  polylines are too many for SVG at interactive frame rates).
+
+### O15.18 Density management and the performance budget
+
+| Metric                                   | Budget                    | Enforcement                          |
+| ---------------------------------------- | ------------------------- | ------------------------------------ |
+| Frame time while panning (1 500 trains)  | ≤ 20 ms (≥ 50 fps)        | perf test in CI with a synthetic feed|
+| Time-scrub re-render                     | ≤ 200 ms                  | measured, logged as a map metric     |
+| Tile response (95th percentile)          | ≤ 120 ms                  | server metric                        |
+| Delta payload per 2 s poll (typical)     | ≤ 40 kB                   | server metric                        |
+| Initial map interactive                  | ≤ 2.5 s cold, ≤ 1 s warm  | Lighthouse + IndexedDB cache         |
+| Memory after 30 min live                 | ≤ 400 MB                  | soak test                            |
+| Visible labels                           | ≤ 40                      | post-render pass (O15.5)             |
+| Distinct colour meanings in viewport     | ≤ 5                       | review rule + dev overlay warning    |
+
+Techniques, in the order they are applied:
+
+1. **GeoJSON sources updated by `setData` with pre-built feature collections** — never
+   per-feature mutation.
+2. **Feature-state for hover/selection/dim** — restyling via `setFeatureState` costs
+   nothing; rebuilding sources costs everything.
+3. **Data-driven styling expressions** so state changes need no JS per frame.
+4. **Interpolation in a `requestAnimationFrame` loop** that writes to a single source,
+   throttled to the display refresh.
+5. **Tile-scoped data only.** Nothing outside the viewport tiles is ever in memory.
+6. **Web Worker** for tile-boundary computation and GeoJSON assembly at load-test scale
+   (Phase 10c in `plan.md`; the interface is designed for it now — all builders are pure
+   functions taking plain data, so moving them to a worker is a transport change only).
+7. **Cluster below z13**, density guard above (O15.9).
+
+### O15.19 Empty, stale and degraded states on the map
+
+| Situation                    | Rendering                                                                    |
+| ---------------------------- | ---------------------------------------------------------------------------- |
+| No data yet                  | skeleton network in slate with a "loading network" chip — never a blank void  |
+| Tile not built               | that area is **cross-hatched grey with "no data"**, not shown as empty track  |
+| Positions stale > 3 min      | trains fade to `train.stale`, banner: "train positions stale — last update HH:MM" |
+| SSE dropped                  | amber chip "live updates reconnecting — polling at 30 s"                      |
+| Read Store down              | map switches to the IndexedDB snapshot, full-width red banner with the snapshot time, all actions disabled |
+| Viewing custom time          | persistent coloured header "VIEWING 14:35 — not live"                         |
+| Unverified topology in view  | those segments render with the `track.unverified` dot pattern + legend note   |
+
+**The rule behind this table:** the map may be wrong about the future, but it must never
+be *quietly* wrong about the present.
+
+### O15.20 Map keyboard and accessibility mode
+
+- `Tab` cycles entities in the viewport by priority (live blocks → conflicts → trains).
+- Arrow keys pan, `+/-` zoom, `[`/`]` step zoom bands, `F` focus, `L` legend,
+  `T` time panel, `G` train graph, `Esc` clear.
+- The current selection is announced via an `aria-live` region in plain language:
+  "Live block B-1042, UP Main 412/3 to 412/7, 38 minutes remaining, protection complete,
+  OHE earthed."
+- A **table view toggle** presents the same viewport contents as an accessible data table.
+  This is both an accessibility feature and the degraded-mode print artefact (L5).
+
+### O15.21 File plan for the map
+
+```
+frontend/components/map/
+  MapContainer.tsx          existing — becomes a thin composition root
+  MapStyle.ts               NEW  basemap style + token→paint compilation
+  layers/
+    baseNetwork.layer.ts    NEW  casing, line, chainage ticks, node symbols
+    block.layer.ts          REPLACES BlockLayer.ts — casing/fill/endcaps/symbols
+    train.layer.ts          REPLACES TrainLayer.ts — cluster/point/label/chevron
+    restriction.layer.ts    NEW
+    traction.layer.ts       NEW
+    conflict.layer.ts       NEW
+    unavailability.layer.ts NEW
+    worksite.layer.ts       NEW
+    selection.layer.ts      NEW  halo/dim via feature-state
+  tools/
+    ExtentDrawTool.tsx      NEW  draw/snap/edit
+    MeasureTool.tsx         NEW  chainage measurement
+  chrome/
+    MapLegend.tsx           NEW  server-driven legend
+    MapFilters.tsx          NEW  layer + semantic filters (URL-synced)
+    MapStatusBar.tsx        NEW  freshness, degraded chips, counts
+    EdgeIndicators.tsx      NEW  off-screen conflict/live-block arrows
+    ViewModeToggle.tsx      NEW  geographic ↔ schematic morph
+  TimeControls.tsx          existing — extended with playback
+  MapSidebar.tsx            existing — becomes entity lists + filters
+  PartKMap.tsx              existing prototype — fold in, then delete
+
+frontend/lib/map/
+  tokens.ts       lod.ts        labels.ts       interpolate.ts
+  geometry.ts     snapping.ts   featureState.ts telemetry.ts
+```
+
+**Deletion is part of the work.** `PartKMap.tsx` and the old layer builders must be
+removed once folded in; two map implementations is how the clarity doctrine dies.
+
+### O15.22 Map data contracts (feature properties)
+
+Every rendered feature carries a flat, stable property set — Maplibre expressions cannot
+read nested objects.
+
+```ts
+interface TrainFeatureProps {
+  id: string; number: string; kind: 'PASSENGER'|'FREIGHT'|'SPECIAL'|'ENGINEERING';
+  priorityClass: number; delayMin: number; delayState: 'ONTIME'|'DELAYED'|'SEVERE';
+  bearing: number; speedKmph: number; trackId: string; chainageM: number;
+  positionQuality: 'OBSERVED'|'INFERRED'|'PROJECTED'; ageSec: number;
+  nextStop?: string; etaAt?: string;
+}
+
+interface BlockFeatureProps {
+  id: string; ref: string; state: 'PROPOSED'|'APPROVED'|'LIVE'|'AT_RISK'|'OVERRUN'|'HANDED_BACK';
+  trafficState: string; powerState: string; adjacentLine: string;
+  startAt: string; endAt: string; remainingMin: number; progressPct: number;
+  department: string; workType: string; packages: number;
+  hasUnknownSafetyFact: boolean; conflictCount: number;
+}
+
+interface RestrictionFeatureProps {
+  id: string; kind: string; valueKmph?: number; imposedAt: string;
+  reviewDueOn: string; overdueDays: number; originBlockRef?: string;
+}
+
+interface UnavailFeatureProps {
+  segmentId: string; effect: string; reasonCode: string;
+  causeBlockId: string; confidence: 'VERIFIED'|'IMPORTED'|'ESTIMATED';
+}
+```
+
+Rule: **anything the renderer needs must be a top-level primitive**; anything the
+inspector needs may be fetched. This split is what keeps the peek instant (O15.6).
+
+### O15.23 Map telemetry
+
+`lib/map/telemetry.ts` records (locally, and optionally to the backend) frame time
+percentiles, tile fetch latency, delta payload size, label suppression count, time-scrub
+latency, and interaction counts per tool. Two purposes: proving the performance budget in
+CI, and learning which map affordances are actually used so the next iteration removes
+what is not.
+
+### O15.24 Map acceptance tests
+
+Each is a definition of done, not a suggestion.
+
+| ID    | Test                                                                                              |
+| ----- | ------------------------------------------------------------------------------------------------- |
+| M-01  | With 1 500 trains and 120 blocks, panning sustains ≥ 50 fps for 30 s                             |
+| M-02  | Scrubbing the slider ±6 h re-renders in < 200 ms per step with no flicker                        |
+| M-03  | A grant event appears on the map within 1 s via SSE, with an animated state transition            |
+| M-04  | Stopping the position feed makes trains visibly stale within 3 min and shows the banner           |
+| M-05  | Selecting a block shades its derived unavailability, and every hatched segment explains itself    |
+| M-06  | A power block without confirmed earthing renders `unknown` hatch and never `earthed`              |
+| M-07  | Drawing an extent snaps to a crossover and reports SLW infeasibility when the crossover is inside |
+| M-08  | Two overlapping demands produce a zigzag on the intersection only, plus an edge indicator when off-screen |
+| M-09  | Geographic ↔ schematic morph animates and keeps all overlays correctly positioned                 |
+| M-10  | At most 40 labels render at any zoom; the "labels reduced" chip appears beyond that               |
+| M-11  | Full keyboard traversal reaches every visible entity and announces it via `aria-live`             |
+| M-12  | With Redis and the Read Store stopped, the map shows the IndexedDB snapshot with a red banner and disabled actions |
+| M-13  | Delta transfer: an unchanged tile returns `unchanged` and the client does not clear it            |
+| M-14  | Colour-blind simulation: every state remains distinguishable by icon or pattern alone             |
+| M-15  | A restriction 8 months overdue is visually distinct from a fresh one without interaction          |
+
+---
+
+## O16. The field application
+
+### O16.1 Form factor decision
+
+**A Progressive Web App inside the same Next.js project**, under `/field`, with its own
+minimal shell, its own service worker scope, and its own bundle budget.
+
+Rationale: one codebase, one auth, one deployment; installable on Android without a store;
+works on low-end devices; no native build pipeline to maintain for an MVP. A native app is
+justified only if we later need background location or hardware integration — recorded as
+a future decision, not taken now.
+
+### O16.2 The safety screen (the most important screen in the system)
+
+Requirements, all non-negotiable:
+
+1. **Three facts, huge, above the fold**: is the block granted; is OHE earthed; is the
+   adjacent line open. Each is a full-width pill with an icon, a word, and a colour.
+2. **A staleness clock is always visible**: "Confirmed 14:32 · 41 s ago". When the app has
+   been offline beyond the threshold, the pills **degrade to `UNKNOWN`** and the screen
+   says, in plain language, "Cannot confirm protection — treat the line as open."
+3. **Never infer.** No cached "granted" state may be shown as current beyond the
+   configured freshness window. This is the single most important line of code in the
+   product.
+4. **A standing disclaimer**: physical protection remains primary; this app records and
+   informs, it does not protect (C4.2).
+5. Large touch targets, high contrast, sunlight mode, one-handed reachability, and the
+   whole screen readable at arm's length.
+
+### O16.3 Offline architecture
+
+```
+lib/offline/
+  db.ts        Dexie schema: assignments, blocks, checklists, queue, media, sync_meta
+  queue.ts     append-only outbound queue with monotonic client sequence
+  sync.ts      background sync: drain queue → pull scope → reconcile
+  conflict.ts  resolution policy
+```
+
+Policies:
+
+- **Writes are queued locally with their true timestamp** and marked `recorded_late` when
+  they sync after the fact. No silent back-dating (O6.7).
+- **Reads are cached per assignment scope**, refreshed opportunistically.
+- **Conflict policy**: server wins for state; client wins for *observations* (a protection
+  confirmation made at 10:14 is a fact and is preserved as such, even if it arrives at
+  10:40). Anything unresolvable is surfaced to the user, never silently dropped.
+- **Media** (photos) are compressed client-side, queued separately, and uploaded on
+  Wi-Fi/good signal; the record is not blocked waiting for the photo.
+- **Emergency path works fully offline** and queues at the front, plus a `tel:` fallback
+  to the control office presented immediately when the network is unavailable (S-43).
+
+### O16.4 Field screens
+
+`/field` (my assignments), `/field/blocks/[id]` (safety screen + checklist + progress +
+extension + hand-back), `/field/defects/new` (60-second capture with camera + GPS, S-01),
+`/field/emergency` (the 7-field form, G15).
+
+---
+
+## O17. Notifications and acknowledgement
+
+### O17.1 Design
+
+A worker service (or a Command Service background task in the MVP) consumes
+`notification.commands` and fans out per recipient and channel.
+
+- **Recipient computation is server-side and rule-based**: for a block, the stakeholder set
+  is derived from the demand owner, the department officer, the controller of the section,
+  the nominated person, resource owners, and any subscriber to the section. Nobody
+  maintains a distribution list by hand — that is how S-17 happens.
+- **Channels** are attempted in priority order per notification priority; `SAFETY` and
+  `URGENT` escalate to SMS/voice fallback.
+- **Acknowledgement is explicit**, tracked per recipient, and drives a dashboard of
+  outstanding acknowledgements plus automatic escalation before the block date (S-18).
+- **Idempotency**: a notification for an `event_id` is created once, regardless of
+  redelivery.
+
+### O17.2 In-app surface
+
+A notification centre with severity grouping, plus non-modal toasts for live events on
+the console and map. Safety notifications are the only ones permitted to interrupt.
+
+---
+
+## O18. Security and access control
+
+### O18.1 Model
+
+**RBAC with scope**: `role × scope` where scope is `zone | division | section |
+department | project`. A permission check answers "may this identity perform this action on
+this entity in this scope".
+
+Roles (initial): `FIELD_USER`, `NOMINATED_PERSON`, `DEPT_OFFICER`, `PLANNER`,
+`CONTROLLER`, `CHIEF_CONTROLLER`, `OPS_MANAGER`, `SAFETY_OFFICER`, `TPC`, `DRM`,
+`PROJECT_MANAGER`, `CONTRACTOR`, `AUDITOR` (read-only, everything), `ADMIN`.
+
+### O18.2 Rules
+
+1. **Deny by default.** Every endpoint declares its required permission; a missing
+   declaration fails the build via a test that enumerates routes.
+2. **Delegation is a record**, time-bounded, with the delegator named on every action
+   taken under it (S-86).
+3. **Elevated actions** (peak override, embargo override, restricted-visibility classes)
+   require re-authentication and a mandatory justification, and always emit an audit
+   record and a notification to the safety officer.
+4. **Contractors and third parties** see only their own sponsored works.
+5. **Auditors** get a read-only role that can query historic state (O19.2) but cannot
+   mutate anything.
+
+### O18.3 Practical hardening checklist
+
+- Access tokens ≤ 15 min, refresh rotation, revocation list in Redis.
+- Passwords (if local auth is used at all) hashed with Argon2id; prefer SSO/OIDC.
+- Every write endpoint requires `Idempotency-Key` and is rate limited.
+- File uploads: extension + MIME + magic-byte validation, size cap, stored with generated
+  names outside the web root, served via short-lived signed URLs.
+- No secret in the repository; `.env.example` documents every variable with a safe default
+  that fails closed.
+- Structured logs exclude tokens, phone numbers and free-text safety notes.
+
+---
+
+## O19. Observability, audit and degraded modes
+
+### O19.1 Observability
+
+- **Structured JSON logs** with `correlation_id`, `actor`, `entity`, `event`.
+- **Metrics** (Prometheus-format endpoint per service): request latency histograms, ETL
+  cycle time and lag, tile hit/miss, event publish/consume lag, outbox backlog, SSE
+  connections, rule firing counts, map frame-time percentiles from the client.
+- **Health endpoints**: `/healthz` (liveness), `/readyz` (dependencies with per-dependency
+  status, used by Compose healthchecks).
+- **Golden signals dashboard** for the demo: write latency, ETL lag, tile latency, live
+  block count, stale-position count.
+
+### O19.2 Audit and reconstruction
+
+- `audit_record` is append-only; the application database role has no `UPDATE`/`DELETE`
+  on it.
+- **Time-travel reconstruction**: `GET /audit/state?entity=block:B-1042&at=…` replays
+  events up to an instant and returns the state as it was known then. This answers the
+  enquiry question "what did the controller actually see at 10:15?" — which is different
+  from "what do we now know was true", and both must be answerable.
+- Every `Decision` stores the options presented and the justification. When the optimiser
+  arrives, its options land here; until then, the array is empty and the justification is
+  the human's own — the record shape does not change.
+
+### O19.3 Correlation across the stack
+
+The gateway's `X-Correlation-Id` is carried into events (`correlation_id`), into ETL
+processing, into cache keys' invalidation messages, and into the frontend's error toasts
+(`CorrelationIdBadge`, already built). A user can read an id off the screen and an
+engineer can trace the entire path.
+
+### O19.4 Degraded modes (L5, made concrete)
+
+| Failure                    | Automatic behaviour                                                    | Artefact                             |
+| -------------------------- | ---------------------------------------------------------------------- | ------------------------------------ |
+| Kafka down                 | outbox accumulates; API keeps working; alarm on backlog                | —                                    |
+| Optimiser absent           | normal operation; "optimiser not enabled" states                       | —                                    |
+| Read Store lag > 60 s      | amber freshness everywhere; approvals warn that impact figures are stale| —                                    |
+| Query Service down         | frontend serves IndexedDB snapshot, read-only, red banner              | snapshot                             |
+| Whole system down          | pre-generated PDFs                                                     | **daily block sheet** per section, regenerated hourly and pushed to field devices |
+| Field device offline       | queued writes, `UNKNOWN` safety states after the freshness window      | cached assignment card               |
+
+The **daily block sheet** is a deliverable, not an afterthought: an A4 PDF per section
+listing every sanctioned block for the next 24 h with extents, times, nominated persons,
+contact numbers and protection requirements. It is what the railway falls back to, and it
+is generated from the same system of record, so it cannot drift (F1.11).
+
+---
+
+## O20. Testing and acceptance
+
+### O20.1 Test pyramid
+
+| Level          | Scope                                                                 | Tooling            |
+| -------------- | --------------------------------------------------------------------- | ------------------ |
+| Unit (pure)    | `db/domain/*` — topology, conflicts, rules, capacity, impact L1, lifecycle | pytest, table-driven |
+| Unit (service) | validation, gates, state transitions with a fake repository            | pytest             |
+| Contract       | every event validated against its JSON Schema; API responses vs OpenAPI| pytest + schemathesis |
+| Integration    | Command → outbox → Kafka → ETL → Read Store → Query                    | pytest + testcontainers/Compose |
+| Frontend unit  | hooks, tile math, label engine, interpolation, tokens                  | vitest             |
+| Frontend E2E   | wizard, console, map behaviours M-01…M-15                              | Playwright         |
+| Performance    | map frame time, tile latency, ETL cycle at load-test scale             | Playwright + k6    |
+| Safety         | the gate suite below                                                   | pytest, mandatory  |
+
+### O20.2 The safety test suite (must never be skipped)
+
+| ID    | Assertion                                                                              |
+| ----- | -------------------------------------------------------------------------------------- |
+| SAF-1 | Work cannot start without traffic block granted                                        |
+| SAF-2 | Work cannot start without every required protection item confirmed                     |
+| SAF-3 | Work near OHE cannot start without `EARTHED`, even if `ISOLATED`                        |
+| SAF-4 | Grant is refused when the nominated person's competency expires before the block date  |
+| SAF-5 | Hand-back is refused with any open disconnection                                        |
+| SAF-6 | Adjacent line `OPEN` without a lookout/warning arrangement is refused at entry (V-11)   |
+| SAF-7 | No role can override SAF-1…SAF-6                                                        |
+| SAF-8 | Field app shows `UNKNOWN` (not the cached state) after the offline freshness window     |
+| SAF-9 | An emergency demand is accepted with the 7 minimum fields and never blocked by validation |
+| SAF-10| Restriction cannot be imposed without extent, value and review date (V-24)              |
+
+### O20.3 Definition of done (per work package)
+
+Code + tests + migration (with downgrade) + OpenAPI/schema updated + seed data covering
+the new case + a screenshot or short clip for UI work + the relevant acceptance rows
+passing + no new lint errors.
+
+---
+
+## O21. Local development and deployment
+
+### O21.1 One-command local stack
+
+```powershell
+docker compose -f infra/docker-compose.yml up -d
+python infra/bootstrap_topics.py
+python -m db.seed --profile demo          # 24 stations / 300 segments / 150 trains
+python -m db.readstore.etl --rebuild all
+# frontend: http://localhost:3004   gateway: http://localhost:8000
+```
+
+Additions needed to Compose: the notification worker, the ETL as a long-running service
+(currently run by hand), and a `seed` one-shot profile so a fresh clone is demo-ready in
+one command.
+
+### O21.2 Environment variables (new)
+
+| Variable                          | Service        | Default (dev)               | Notes                          |
+| --------------------------------- | -------------- | --------------------------- | ------------------------------ |
+| `AUTH_MODE`                       | gateway        | `stub`                      | `stub` \| `oidc`               |
+| `OIDC_ISSUER` / `OIDC_AUDIENCE`   | gateway        | —                           | required when `oidc`           |
+| `CORS_ALLOWED_ORIGINS`            | gateway        | `http://localhost:3004`     | strict list, no `*` outside dev|
+| `RATE_LIMIT_WRITES_PER_MIN`       | gateway        | `60`                        |                                |
+| `SSE_ENABLED`                     | query          | `true`                      |                                |
+| `TILE_TIME_BUCKET_MIN_TRAINS`     | query/etl      | `15`                        | must match the frontend        |
+| `ETL_MODE`                        | etl            | `incremental`               | `full` \| `incremental`        |
+| `ETL_INTERVAL_SEC`                | etl            | `2`                         |                                |
+| `READINESS_GATE_HOURS_BEFORE`     | command        | `24`                        |                                |
+| `FIELD_FRESHNESS_WINDOW_SEC`      | frontend/field | `300`                       | **safety-relevant**            |
+| `NEXT_PUBLIC_MAP_STYLE_URL`       | frontend       | local style                 | basemap source                 |
+| `NEXT_PUBLIC_DEFAULT_LOCALE`      | frontend       | `en`                        |                                |
+| `WEATHER_PROVIDER` / `_API_KEY`   | command        | `none`                      | optional; degrades to manual   |
+
+### O21.3 Deployment posture (beyond local)
+
+Not in scope to build now, but the shape is fixed so nothing has to be undone: stateless
+services behind a load balancer, Postgres managed with PITR, Redpanda/Kafka managed or
+3-node, Redis with persistence off (cache only), object storage for attachments, and the
+frontend on any Node host or static+edge runtime. Everything is already containerised, so
+this is a configuration exercise, not a rewrite.
+
+---
+
+## O22. Delivery sequence
+
+Work packages, ordered by dependency. **No package here contains optimiser work.**
+Each has an exit criterion that can be demonstrated.
+
+| WP  | Package                          | Depends on | Exit criterion                                                        |
+| --- | -------------------------------- | ---------- | --------------------------------------------------------------------- |
+| W1  | Topology & traction schema + seed| —          | 24-station network with curves, turnouts, elementary sections, loads in the map |
+| W2  | Chainage & geometry utilities    | W1         | Any chainage range renders on the true track geometry                 |
+| W3  | Topology expansion engine (O8)   | W1, W2     | Selecting a block shades a correct, explained unavailability set      |
+| W4  | Demand schema + wizard intake    | W1         | Full Part G demand can be created, saved, versioned                   |
+| W5  | Validation + rules engine        | W4         | All V-01…V-24 fire correctly with citations                           |
+| W6  | Conflict detection + L1 impact   | W3, W4     | Two clashing demands produce explained conflicts and detention figures|
+| W7  | Read Store projections + tiling  | W1–W6      | All map layers delta-transfer correctly                               |
+| W8  | Query endpoints + cache registry | W7         | Every screen served by one call each, within latency budget           |
+| W9  | **Dynamic map — core**           | W7, W8     | M-01, M-02, M-05, M-13 pass                                           |
+| W10 | **Dynamic map — clarity**        | W9         | M-08, M-10, M-14, M-15 pass                                           |
+| W11 | Execution lifecycle + gates      | W4         | SAF-1…SAF-7 pass                                                      |
+| W12 | Live console + SSE               | W11, W8    | M-03, M-04 pass; grant→map latency < 1 s                              |
+| W13 | Field PWA + offline              | W11        | SAF-8, SAF-9 pass; full offline block execution                       |
+| W14 | Restrictions + resources + readiness | W11    | SAF-10 passes; readiness board works                                   |
+| W15 | Notifications + acknowledgement  | W11        | Stakeholder set computed; acknowledgement dashboard live              |
+| W16 | RBAC + audit + degraded modes    | W11        | M-12 passes; audit reconstruction answers "what was known at T"       |
+| W17 | Map extras: draw, morph, graph   | W9, W10    | M-07, M-09 pass; train graph linked                                   |
+| W18 | Analytics, scorecards, KPIs      | W7, W11    | Claimed-vs-actual visible per department                              |
+| W19 | i18n, accessibility, print       | W9–W13     | M-11 passes; block sheet PDF generated hourly                         |
+| W20 | Hardening, perf, docs, demo      | all        | Full budget table met; demo script runs unassisted                    |
+
+Parallelisation: W4/W5 (write path) and W7/W8/W9 (read path + map) can run concurrently
+once W1–W3 land. W13 (field) can start as soon as W11's endpoints exist.
+
+---
+
+## O23. What is needed from you — the requirements guide
+
+This chapter exists so that work is never silently blocked waiting for an answer. It lists
+everything only you (the product owner) can decide or provide, states the **default that
+will be applied if you say nothing**, and marks whether it blocks work.
+
+> **How to use it:** answer the fast questionnaire in O23.7 first (ten minutes). Everything
+> else can be answered as the relevant work package approaches.
+
+### O23.1 Decisions — product and scope
+
+| #    | Decision                                                     | Options                                                                 | Default if silent                        | Blocks   |
+| ---- | ------------------------------------------------------------ | ----------------------------------------------------------------------- | ---------------------------------------- | -------- |
+| D-01 | Target audience for the first demo                           | judges/evaluators · railway SMEs · internal only                        | judges/evaluators                        | W20      |
+| D-02 | Scope of the first release                                    | full Part O · map + read path only · write path only                    | map + execution lifecycle + demand intake| W22 plan |
+| D-03 | Is the field PWA in the first release?                       | yes · no                                                                | yes, minimal (safety screen + checklist) | W13      |
+| D-04 | Real auth or stub for the demo                                | OIDC · local users · stub                                               | local users with seeded roles            | W16      |
+| D-05 | Multi-tenancy (multiple divisions visible at once)            | yes · single division                                                   | single division, schema ready for more   | W1       |
+| D-06 | Emergency block path in scope                                 | yes · no                                                                | yes (it is cheap and it is the headline) | W4       |
+| D-07 | Third-party/contractor portal                                 | yes · no                                                                | no (schema reserved)                     | W4       |
+| D-08 | Which languages                                               | list                                                                    | English + Hindi                          | W19      |
+| D-09 | Do we need printable artefacts (block sheet PDF)?             | yes · no                                                                | yes                                      | W19      |
+| D-10 | Optimiser interface stub visible in the UI?                   | show "not enabled" · hide entirely                                      | show "not enabled" (honest)              | W9       |
+
+### O23.2 Decisions — domain policy (defaults are guesses; your answers make them real)
+
+| #    | Question                                                                  | Default applied                                   | Blocks |
+| ---- | ------------------------------------------------------------------------- | ------------------------------------------------- | ------ |
+| P-01 | Notice period per block class                                             | Routine 14 d, Mega 30 d, Major 60 d, Short 24 h   | W5     |
+| P-02 | Peak / embargo windows to enforce                                         | 07:00–11:00 and 17:00–21:00 on the demo section   | W5     |
+| P-03 | Approval chain per class (who signs what)                                 | Dept officer → Planner → Ops manager; Safety for high-risk | W11 |
+| P-04 | SLA per lifecycle stage                                                   | scrutiny 2 d, analysis 1 d, approval 3 d          | W5     |
+| P-05 | Criticality levels and their exact definitions                            | the six in G4 3.7                                 | W4     |
+| P-06 | Competency codes required per work type                                   | a small demo set                                  | W11    |
+| P-07 | Cost model (₹ per train-minute, per cancellation, per tonne-hour)          | placeholder values, clearly labelled              | W6     |
+| P-08 | Capacity profiles (trains/hour) for normal, SLW, degraded                 | 12 / 5 / 8 on the demo section                    | W6     |
+| P-09 | Freshness window before the field app declares `UNKNOWN`                   | 300 s                                             | W13    |
+| P-10 | Maximum consecutive night blocks per gang                                 | 3                                                 | W5     |
+| P-11 | Restriction review period after imposition                                | 30 days                                           | W14    |
+| P-12 | Who may override an embargo/peak window                                   | `OPS_MANAGER` and above, with justification       | W16    |
+| P-13 | Retention period for audit and safety records                             | 7 years (configurable)                            | W16    |
+| P-14 | Emergency record completion deadline                                      | 24 h                                              | W4     |
+
+### O23.3 Data you need to provide (or approve synthetic substitutes)
+
+| #    | Data                                       | Ideal format                                     | If unavailable                                          | Blocks |
+| ---- | ------------------------------------------ | ------------------------------------------------ | ------------------------------------------------------- | ------ |
+| N-01 | Track topology for the demo section        | CSV/GeoJSON: nodes, segments, chainage, line ids | synthetic generator (O4.5) — **fully sufficient for a demo** | W1  |
+| N-02 | Station list with codes and coordinates    | CSV                                              | synthetic                                               | W1     |
+| N-03 | Turnouts / crossovers                      | CSV                                              | synthetic                                               | W1     |
+| N-04 | Traction elementary sections + earth points| CSV                                              | synthetic                                               | W1     |
+| N-05 | Working timetable / paths                  | CSV or GTFS-like                                 | synthetic 150-train day                                 | W6     |
+| N-06 | Live train positions feed                  | API or sample dump                               | simulated feed driven by the timetable                  | W9     |
+| N-07 | Work-type taxonomy actually used           | list                                             | the G4.1 taxonomy                                       | W4     |
+| N-08 | Real (redacted) block request examples     | scans/photos/spreadsheets                        | invented but plausible                                  | W4     |
+| N-09 | Machine/gang inventory                     | CSV                                              | synthetic                                               | W14    |
+| N-10 | Rule sources (circulars, enquiry findings) | text + citation                                  | placeholder citations, clearly marked                   | W5     |
+| N-11 | Basemap preference                         | style URL or "generic"                           | a neutral open style; railway drawn from our own data   | W9     |
+
+> **Important:** none of N-01…N-11 blocks progress. The synthetic generator is designed to
+> be a credible stand-in. Real data improves realism; it is not a prerequisite.
+
+### O23.4 Accounts, credentials and infrastructure
+
+| #    | Item                                     | Needed for                        | If unavailable                      |
+| ---- | ---------------------------------------- | --------------------------------- | ----------------------------------- |
+| A-01 | Map tile/style provider (if not self-hosted) | basemap                       | self-hosted neutral style           |
+| A-02 | Weather API key                          | V-18, readiness gate               | weather checks disabled, marked N/A |
+| A-03 | SMS/push provider                        | notification escalation            | in-app only, escalation simulated   |
+| A-04 | OIDC/SSO details                         | real auth                          | seeded local users                  |
+| A-05 | Object storage bucket                    | attachments/photos                 | local volume in Compose             |
+| A-06 | Deployment target (if any)               | beyond local                       | local Docker Compose only           |
+
+None of these block local development; each degrades to a clearly-labelled stub.
+
+### O23.5 Design and branding inputs
+
+| #    | Item                                    | Default if not provided                          |
+| ---- | --------------------------------------- | ------------------------------------------------ |
+| B-01 | Logo / wordmark                         | text wordmark                                    |
+| B-02 | Brand colours                           | the existing token palette (already accessible)  |
+| B-03 | Any mandated government UI standard     | none applied                                     |
+| B-04 | Terminology preferences (block vs possession, etc.) | Indian Railways terminology as used in Part A2 |
+| B-05 | Demo narrative you want the UI to tell  | the S-11 → bundling → execution story            |
+
+### O23.6 People and time from your side
+
+| #    | Ask                                                     | How much                       | Why it matters                                   |
+| ---- | ------------------------------------------------------- | ------------------------------ | ------------------------------------------------ |
+| T-01 | One review of the demand form fields                    | 45 min                         | Prevents building a form nobody will fill (S-83) |
+| T-02 | One walkthrough of the map with a controller mindset    | 45 min after W9                | Clarity cannot be validated by the builder       |
+| T-03 | Sign-off on the safety-state wording (field app)        | 20 min                         | The exact words matter more than the code        |
+| T-04 | Answers to the O23.7 questionnaire                      | 10 min                         | Unblocks defaults becoming decisions             |
+| T-05 | Confirmation of the demo script and running order       | 30 min before W20              | Demo failures are usually sequencing failures    |
+
+### O23.7 The fast questionnaire (copy, answer inline, paste back)
+
+```
+1.  Primary audience for the first demo?                       →
+2.  Must the field/mobile app be in the first release?          →
+3.  Real login, or seeded demo users?                           →
+4.  Do you have ANY real topology/timetable data?               → yes / no / partial
+5.  If no real data: is a synthetic 24-station network OK?       → yes / no
+6.  Languages needed in the first release?                       →
+7.  Which single screen must be flawless on demo day?            → map / console / wizard / dashboard
+8.  Peak windows to enforce on the demo section?                 →
+9.  Are placeholder cost figures (₹/train-minute) acceptable?    → yes / no
+10. Anything from Parts B–N you want explicitly DROPPED?         →
+11. Anything from Parts B–N you want explicitly PRIORITISED?     →
+12. Deadline or milestone date I should sequence against?        →
+```
+
+### O23.8 Blocking vs non-blocking summary
+
+| Truly blocking (work stops without an answer) | Non-blocking (default applied, revisit later)        |
+| --------------------------------------------- | ---------------------------------------------------- |
+| D-02 scope of the first release               | every item in O23.2 (policy defaults exist)          |
+| D-08 languages, only at W19                   | every item in O23.3 (synthetic data exists)          |
+| P-09 field freshness window, at W13           | every item in O23.4 (stubs exist)                    |
+| A-04 only if real auth is mandatory           | every item in O23.5 (defaults exist)                 |
+
+**Everything else proceeds on documented defaults**, which are recorded in O24 so that no
+assumption is invisible.
+
+---
+
+## O24. Assumptions register
+
+Applied where no instruction exists. Each is cheap to reverse if challenged early.
+
+| #    | Assumption                                                                        | Reversal cost |
+| ---- | --------------------------------------------------------------------------------- | ------------- |
+| AS-1 | A synthetic network is acceptable for demonstration and load testing               | none          |
+| AS-2 | One division, one corridor, in the first release                                   | low           |
+| AS-3 | Train positions are simulated from the timetable, with realistic jitter and gaps   | low           |
+| AS-4 | Impact stays at Level 1 (deterministic); no propagation modelling                  | medium        |
+| AS-5 | No optimiser in this work; all ranked-suggestion UI shows "not enabled"            | none          |
+| AS-6 | Attachments are stored locally in dev, object storage later                        | low           |
+| AS-7 | Notifications are in-app only unless a provider is supplied                        | low           |
+| AS-8 | Auth is seeded local users with real RBAC enforcement                              | low           |
+| AS-9 | English + Hindi, with safety strings translated first                              | low           |
+| AS-10| PostGIS is not used; JSONB geometry + bbox columns are sufficient                   | medium        |
+| AS-11| Polling + SSE only; no WebSocket in this work                                       | low           |
+| AS-12| Cost figures are placeholders and are labelled as such in the UI                    | none          |
+| AS-13| The map's basemap is a neutral open style; all railway detail is our own data       | low           |
+| AS-14| Curved, organic track geometry is required (a straight-line network hides real problems) | none     |
+
+---
+
+## O25. The optimisation service boundary
+
+### O25.1 Why it is excluded here
+
+By explicit instruction, and by the sequencing argument of [N4](#n4-closing-note). The
+optimiser is the last thing to build, not the first: it consumes truthful topology,
+structured demand, resource facts and actuals — all of which this work produces.
+
+### O25.2 What is emphatically NOT built in Part O
+
+- Objective function implementation, weights, or tuning (H8.4).
+- Search, heuristics, CP/MIP models, solver integration (H8.5).
+- Shadow finder / bundling **search and ranking** (H5). *(Overlap **detection** is built —
+  it is deterministic set intersection, not search.)*
+- Ranked plan options and their comparison scoring (H8.6).
+- Learned duration models and estimate calibration (H11).
+- Automatic re-planning proposals after disruption (only the *queueing* of affected blocks
+  is built; proposing the new plan is the optimiser's job).
+
+### O25.3 The frozen interface
+
+The optimiser, when it arrives, plugs in without changing anything built here.
+
+**It consumes** (already produced by this work):
+
+| Source                        | Content                                                    |
+| ----------------------------- | ---------------------------------------------------------- |
+| `plan.commands` (Kafka)       | planning-run requests                                       |
+| `demand.events`               | the full structured demand set                              |
+| Operational DB (read)         | demands, network, traction, resources, bookings, calendars  |
+| `db.domain.topology.expand()` | derived unavailability (deterministic, shared)              |
+| `db.domain.conflicts.detect()`| conflict facts (deterministic, shared)                      |
+| `db.domain.impact_l1`         | detention arithmetic                                        |
+| `block_actuals` + `DurationStats` | history for calibration                                 |
+
+**It produces** (already consumed by this work):
+
+```json
+// topic: optimization.results
+{ "planning_run_id": "…", "horizon": {"from": "…", "to": "…"},
+  "weights_version": "…",
+  "options": [
+    { "option_id": "…", "score": 0.82,
+      "components": {"detention": …, "backlog": …, "utilisation": …},
+      "blocks": [ { "demand_ids": ["…"], "window": {"from":"…","to":"…"},
+                    "segments": ["…"], "rationale": "…" } ],
+      "binding_constraints": [ {"rule": "H-07", "text": "…"} ],
+      "rejected_alternatives": [ {"summary": "…", "reason": "…"} ] } ] }
+```
+
+The Read Store already has a place for these (`PlanSummary`, `Decision.options`), the
+approval screen already has the panel, and the map already has a "proposed" style. When
+the optimiser ships, those surfaces light up with **no changes to the write path, the read
+path, the map or the field app**.
+
+### O25.4 The rule that keeps this honest
+
+Until an optimiser exists, **no screen may imply that one does**. Empty option lists render
+as "optimiser not enabled — suggestions below are rule-based only". Overstating machine
+intelligence is precisely the failure mode S-93 warns about, and it is easier to avoid at
+the start than to walk back later.
+
+---
+
+## O26. Closing note on Part O
+
+Part O adds nothing to the argument of Parts A–N. It only makes them buildable.
+
+Three things are worth restating, because they are the ones most likely to be traded away
+under time pressure and most expensive to recover afterwards:
+
+1. **Truthful topology with honest confidence flags.** Every derived conclusion the system
+   presents — what else becomes unusable, whether single-line working is possible, how
+   wide the isolation must be — is only as good as the graph beneath it. A confident
+   answer from an unverified graph is worse than no answer.
+2. **Actuals capture that costs the field user nothing.** If reporting what happened takes
+   more than two minutes, it will not happen, and the system will never learn. Every other
+   ambition depends on this one unglamorous screen.
+3. **A map that is dynamic and clear at the same time.** Dynamism without clarity is a
+   light show; clarity without dynamism is a printout. The settlement between them —
+   the level-of-detail contract, the token system, the label budget, focus-not-hide, and
+   loud honesty about staleness — is the difference between a map a controller trusts at
+   03:00 and one they close.
+
+Build in that order, and the optimiser — when it is finally written — will have something
+true to reason about.
+
+---
+# block-planner backend — handoff for frontend integration
+
+This document explains what's been built so far, why it's shaped the way it
+is, and everything you need to start wiring a frontend against it. It's a
+snapshot, not a living doc — for anything that changes after this is
+written, `CLAUDE.md` at the repo root is the authoritative, continuously
+updated source (it has the full decision history, every verification run,
+and every gotcha discovered along the way). Read this first for the shape
+of the system; go to `CLAUDE.md` when you need the "why" behind a specific
+design choice or a deeper dive into the scheduling algorithms themselves.
+
+## 1. What this system does
+
+SIH 26027: railway maintenance blocks. Three departments (Engineering,
+S&T, Traction) need to close sections of track to do maintenance work.
+Today they each grab track time independently, which wastes capacity. This
+project demonstrates that a shared, coordinated schedule — computed by a
+constraint solver — beats the uncoordinated status quo, on a synthetic but
+realistic 100km double-track railway section over a 30-day planning
+horizon.
+
+Concretely, the backend:
+1. **Generates** a synthetic problem instance (track layout, train
+   timetable, a backlog of maintenance jobs) from a seed.
+2. **Schedules** it three different ways — a greedy uncoordinated baseline,
+   and two variants of a CP-SAT solver that coordinates across departments
+   (one using ground-truth job priorities, one using an ML-predicted
+   priority).
+3. **Validates** every schedule independently against physical feasibility
+   rules (no double-booked track, no train/maintenance conflicts, etc.).
+4. **Persists** everything to Postgres and serves it over a REST API.
+
+The frontend's job is to let a user pick a scenario, kick off runs, watch
+them complete, and visualize/compare the resulting schedules — most
+importantly as a Gantt-style chart of possessions and jobs, plus
+side-by-side metric comparisons against the baseline.
+
+## 2. Repo layout
+
+```
+src/            the scheduling pipeline itself (pure Python + pandas + OR-Tools + LightGBM)
+  config.py       every tunable constant -- single source of truth
+  data_gen.py     synthetic section/trains/jobs/windows generator
+  baseline.py     greedy uncoordinated scheduler
+  solver.py       CP-SAT coordinated scheduler
+  model.py        LightGBM job-priority classifier
+  check.py        independent feasibility validator (runs against ANY schedule)
+
+api/            FastAPI backend exposing src/ over HTTP + Postgres persistence
+  main.py         app entry point, CORS, /health
+  config.py       env vars (DATABASE_URL, SOLVE_TIME_LIMIT, MODEL_PATH)
+  schemas.py      Pydantic request/response models
+  routers/        thin HTTP layer (scenarios.py, runs.py)
+  services/       real logic (persistence.py, solve_runner.py, transform.py)
+  models/         SQLAlchemy ORM (tables.py, database.py) + Alembic migrations
+                  -- NOT the same as the repo-root models/ dir below
+
+scripts/
+  run.py          batch CLI: run data_gen -> baseline/solver -> check over many seeds
+  seed_demo.py    provisions fixed named demo scenarios, pre-solved (see §7)
+
+models/         joblib artifact for the trained priority classifier (mounted into the container)
+tests/          pytest suite for src/
+docker-compose.yml, Dockerfile   the whole stack: api + postgres
+CLAUDE.md       full project history / decisions / verified findings (long, detailed)
+```
+
+**Important distinction**: `api/models/` is SQLAlchemy ORM code
+(`tables.py`, `database.py`). The repo-root `models/` is a directory
+holding the trained ML model's `.joblib` file. Same word, unrelated
+things — don't confuse them when navigating.
+
+## 3. Domain concepts you need to know
+
+- **Job**: one maintenance task. Belongs to a department (Engineering /
+  S&T / Traction), sits on one `segment` (of 20, each 5km) and one `line`
+  (Up/Down), has an `estimated_duration_min`, and a `priority_class`
+  (`Critical` / `High` / `Medium` / `Low`).
+- **Backlog vs in-horizon jobs**: the job list isn't a clean slate. Some
+  jobs are already overdue at day 0 (`day < 0`, id prefix `BKL-`); others
+  arrive during the 30-day horizon (`day >= 0`).
+- **Window**: maintenance can only happen inside two daily permitted
+  windows — a 180-minute night window and a shorter 90-minute midday
+  window, same clock times every day, section-wide.
+- **Possession**: the actual unit that gets granted. A possession blocks
+  one line over a contiguous range of segments for the full span of one
+  window instance — no train can enter that range for that whole span.
+  Multiple jobs can share one possession if they're on different segments
+  within its range. **This is the central coordination mechanism**: the
+  uncoordinated baseline gives every job its own possession (wasteful —
+  it blocks a whole window slot for just one job's segment); the solver
+  packs multiple jobs into shared possessions. The demonstrated win is
+  mostly "far fewer possessions for the same work," not "faster
+  scheduling."
+- **Approach**: one of three ways to produce a schedule for a given
+  scenario —
+  - `baseline`: greedy, each department schedules independently, no
+    coordination.
+  - `solver_gt`: CP-SAT solver, using each job's true `priority_class` as
+    the optimization weight.
+  - `solver_ml`: CP-SAT solver, using an ML-predicted `priority_class`
+    instead of the ground truth (the realistic case — in production you
+    wouldn't have ground-truth priority, you'd have a model's guess).
+- **Scenario**: a named, reproducible problem instance — a seed plus
+  `backlog_size`/`jobs_per_day` parameters. The same scenario can have
+  multiple runs (one per approach) so they're directly comparable.
+
+## 4. Data model (Postgres, via SQLAlchemy)
+
+Three tables, `Scenario` (1) → `Run` (many) → `Result` (1:1):
+
+```python
+class Scenario:
+    id, name, seed, backlog_size, jobs_per_day, horizon_days, created_at
+
+class Run:
+    id, scenario_id, approach, status, solve_time_limit, solve_time_actual,
+    solver_status, error_message, created_at, completed_at
+
+class Result:
+    id, run_id, schedule_json, possessions_json, metrics_json,
+    validation_violations_json, unscheduled_json   # all JSONB
+```
+
+```python
+Approach = "baseline" | "solver_gt" | "solver_ml"
+RunStatus = "pending" | "running" | "complete" | "failed"
+```
+
+A `Scenario` row alone is just parameters — no schedule exists until a
+`Run` is created and solved. A `Run` moves through
+`pending -> running -> complete` (or `-> failed`) and only gets a `Result`
+row once it reaches `complete`. **The frontend never queries the ORM
+directly — this is just useful background for understanding the JSON
+shapes the API hands back.**
+
+## 5. How a run actually executes (background jobs, no task queue)
+
+There's deliberately no Celery/Redis/worker process here — it's a
+single-node hackathon demo. `POST /scenarios/{id}/runs` creates the `Run`
+row (`status: pending`) and hands the actual work to FastAPI's
+`BackgroundTasks`, which runs it in a worker thread automatically (since
+the background function is a plain synchronous function, not `async def`)
+— so the API keeps responding to other requests (including polling the
+very run you just started) while a CP-SAT solve is in flight for up to 60
+seconds.
+
+The background function (`api/services/solve_runner.py::run_scenario`)
+does, in order: set status to `running` → regenerate the scenario's data
+from its stored seed/params → run the requested approach → validate the
+result → save schedule/possessions/metrics/violations → set status to
+`complete`. If *anything* in that chain throws, it's caught and the run is
+marked `failed` with the exception message — a run can never be left
+stuck in `running`.
+
+**This means the frontend must poll.** There is no websocket/SSE push.
+Flow for the frontend:
+1. `POST /scenarios/{id}/runs` → get back `{id, status: "pending"}` immediately.
+2. Poll `GET /runs/{id}` (cheap, metadata-only) until `status` is
+   `complete` or `failed`. A sensible interval is 1-2s; a `solver_gt`/
+   `solver_ml` run can take up to `SOLVE_TIME_LIMIT` (60s by default),
+   `baseline` finishes in well under a second.
+3. Once `complete`, fetch `GET /runs/{id}/schedule` and/or
+   `GET /runs/{id}/metrics` for the actual payload.
+4. If `failed`, `GET /runs/{id}` includes `error_message`.
+
+## 6. API reference
+
+Base URL when running via docker-compose: `http://localhost:8000`. CORS is
+open to `http://localhost:*` and `http://127.0.0.1:*` (any port) — a
+frontend dev server on any local port will work without extra config; no
+other origins are allowed (no auth either — this is demo-scope only, don't
+build in front of it as if it were production-hardened).
+
+### `GET /health`
+Liveness + whether the ML model actually loaded.
+```json
+{"status": "ok", "version": "0.1.0", "model_loaded": true}
+```
+
+### `GET /scenarios`
+List every scenario with each approach's most recent run status. Cheap,
+no payloads — good for a scenario picker's initial load.
+```json
+[
+  {
+    "id": 3,
+    "name": "Standard section",
+    "seed": 42,
+    "runs": {"baseline": "complete", "solver_gt": "complete", "solver_ml": "complete"}
+  }
+]
+```
+`runs` always has all three approach keys; value is `null` if that
+approach has never been run on this scenario.
+
+### `POST /scenarios`
+Create a scenario (parameters only — **no data is generated yet**, that
+happens lazily the first time a run against it executes).
+```json
+// request
+{"name": "My scenario", "seed": 123, "backlog_size": 240, "jobs_per_day": 2.5}
+// backlog_size / jobs_per_day are optional, default from src/config.py
+// name and seed are required
+
+// response  200
+{"id": 6}
+```
+
+### `POST /scenarios/{scenario_id}/runs`
+Kick off a run. Returns immediately — does not wait for the solve.
+```json
+// request
+{"approach": "solver_ml", "solve_time_limit": 60}
+// approach: "baseline" | "solver_gt" | "solver_ml"  (required)
+// solve_time_limit: optional seconds, ignored for baseline, defaults to
+// SOLVE_TIME_LIMIT (60) if omitted for a solver approach
+
+// response  200
+{"id": 17, "status": "pending"}
+```
+`404 {"detail": "scenario not found"}` if `scenario_id` doesn't exist.
+
+### `GET /runs/{run_id}`
+Status metadata only — never the schedule payload (poll this, not
+`/schedule`, while waiting).
+```json
+{"status": "complete", "solver_status": "FEASIBLE", "solve_time_actual": 60.09, "error_message": null}
+```
+`status`: `pending` | `running` | `complete` | `failed`.
+`solver_status`: OR-Tools status string (`"FEASIBLE"`/`"OPTIMAL"`/etc.) for
+solver approaches, literal `"N/A"` for baseline, `null` before completion.
+`404` if `run_id` doesn't exist.
+
+### `GET /runs/{run_id}/schedule`
+The full Gantt data source. **404** if the run doesn't exist, **409**
+`{"detail": "run is <status>, not complete"}` if it exists but hasn't
+finished — use this to distinguish "wrong id" from "still solving" in the
+UI.
+```json
+{
+  "possessions": [
+    {"id": "POSS-001-primary-Down-5", "line": "Down", "start_segment": 5, "end_segment": 8, "start_min": 1500, "end_min": 1680}
+  ],
+  "jobs": [
+    {
+      "id": "BKL-0001", "possession_id": "POSS-004-primary-Down-6", "segment": 6, "line": "Down",
+      "department": "Engineering", "priority_class": "Medium",
+      "start_min": 5920, "end_min": 6000, "wait_days": 4, "duration_min": 80
+    }
+  ],
+  "unscheduled": [
+    {"id": "BKL-0000", "segment": 14, "department": "Traction", "priority_class": "High"}
+  ]
+}
+```
+Notes for rendering:
+- `start_min`/`end_min` are integer minutes from horizon start (day 0,
+  minute 0) — divide by 1440 for day index, mod 1440 for clock time within
+  the day.
+- Every scheduled job's `possession_id` always points at an entry in
+  `possessions` (verified: 0 unmatched in every test run) — a job's
+  segment always falls inside its possession's `[start_segment,
+  end_segment]` range and its time window inside the possession's.
+  Multiple jobs can share one `possession_id`.
+- `unscheduled` jobs have no `start_min`/`end_min`/`line`/`possession_id`
+  at all — they never got placed. Show them separately (e.g. a "did not
+  fit" list), not on the Gantt timeline.
+- `wait_days` is how many days the job waited to start, relative to when
+  it became actionable (report day, floored at horizon start) — the
+  metric this project treats as the fair scheduler-behavior signal (see
+  §8 for why, vs. the more naively-obvious `delay_days`, which isn't
+  exposed per-job on this endpoint, only aggregated in `/metrics`).
+- Response sizes are real payloads: ~60-70KB for a full scenario (hundreds
+  of jobs/possessions). Fast though — verified 20-40ms server-side.
+  Fine to fetch whole and render client-side; no pagination.
+
+### `GET /runs/{run_id}/metrics`
+Just the metrics dict, small and fast — poll/fetch this independently of
+the schedule if you just need summary numbers. Same 404/409 rules as
+`/schedule`.
+```json
+{
+  "jobs_unscheduled": 76,
+  "n_possessions": 83,
+  "line_blocked_min": 68490.0,
+  "total_job_duration_min": 22075.0,
+  "weighted_wait": 8550.89,
+  "wait_days": {"Critical": 7.47, "High": 9.38, "Medium": 13.28, "Low": 10.09},
+  "mean_delay_days": {"Critical": 71.53, "High": 57.12, "Medium": 40.86, "Low": 24.8}
+}
+```
+`wait_days`/`mean_delay_days` are keyed by `priority_class`. This exact
+key set is a contract other code relies on — don't expect fields to
+disappear, new ones may be added over time without a version bump.
+
+### `GET /scenarios/{scenario_id}/comparison`
+Metrics for every **complete** run on a scenario, keyed by approach, plus
+`baseline`-relative percentage differences.
+```json
+{
+  "scenario_id": 3,
+  "metrics": {
+    "baseline":  { "...": "full metrics dict, same shape as /metrics" },
+    "solver_gt": { "...": "..." },
+    "solver_ml": { "...": "..." }
+  },
+  "comparison_to_baseline": {
+    "solver_gt": {
+      "n_possessions": -59.53,
+      "weighted_wait": -1.95,
+      "wait_days": {"Critical": -0.84, "High": -9.78, "Medium": 15.06, "Low": -5.38},
+      "...": "one entry per metric key, recursing into dict-valued ones"
+    },
+    "solver_ml": { "...": "..." }
+  }
+}
+```
+Percentage diff sign convention: **negative = lower than baseline**
+(no "good"/"bad" judgment baked in — e.g. a negative `n_possessions` is an
+improvement, a negative `weighted_wait` is an improvement, but a negative
+`total_job_duration_min` wouldn't necessarily be — the frontend/consumer
+decides what "better" means per metric). A metric entry is `null` if the
+baseline value was `0`/`NaN` (percentage change against nothing is
+undefined). **If `baseline` was never run on this scenario**,
+`comparison_to_baseline` for every solver approach is the literal string
+`"baseline has not been run for this scenario"` instead of a number —
+check for a string vs. an object before rendering. `404` for an unknown
+`scenario_id`; no 409 here (it just reports whatever complete runs exist,
+possibly none).
+
+### `GET /scenarios/{scenario_id}/summary`
+Scenario parameters + everything `/comparison` returns, in one call — use
+this for a scenario-picker/detail view instead of two round trips.
+Verified fast: 16-98ms.
+```json
+{
+  "id": 3, "name": "Standard section", "seed": 42,
+  "backlog_size": 240, "jobs_per_day": 2.5, "horizon_days": 30,
+  "metrics": { "...": "same as /comparison" },
+  "comparison_to_baseline": { "...": "same as /comparison" }
+}
+```
+
+## 7. Demo data already seeded — use this to start building today
+
+You don't have to create scenarios or wait 60 seconds for anything —
+`scripts/seed_demo.py` has already pre-solved three fixed, named
+scenarios against the live stack (all 9 runs `complete`, 0 validation
+violations). As of this writing:
+
+| scenario_id | name             | seed | backlog_size | notes |
+|---|---|---|---|---|
+| 3 | Standard section | 42 | 240 | the main demo case |
+| 4 | Heavy backlog    | 42 | 480 | worse maintenance debt |
+| 5 | Light load       | 42 | 60  | lighter load |
+
+Each has three `complete` runs (`baseline`, `solver_gt`, `solver_ml`) —
+try e.g. `GET /scenarios/3/summary` or `GET /runs/8/schedule` (scenario
+3's `baseline` run) right now. Run ids for scenario 3 are 8/9/10
+(baseline/solver_gt/solver_ml respectively) as of this writing, but
+**don't hardcode run ids in the frontend** — always resolve them via
+`GET /scenarios/{id}` or `/summary`'s parent list, since re-running or
+reseeding will create new ones. If this data ever looks stale or
+inconsistent, `docker compose exec api python -m scripts.seed_demo` is
+idempotent and safe to rerun (it skips anything already `complete`).
+
+## 8. Things worth knowing before you build the UI
+
+- **Not every solver run beats baseline.** This is a real, measured
+  finding (see `CLAUDE.md`), not a bug: across a 30-seed batch,
+  `n_possessions` improves in 30/30 seeds (the reliable win — lead with
+  this), but `weighted_wait` only improves in ~21/30 seeds. Don't build a
+  UI that assumes green-across-the-board; a comparison view should be
+  able to show a metric getting worse without looking broken.
+- **Solver `solver_status` is usually `"FEASIBLE"`, not `"OPTIMAL"`** —
+  CP-SAT runs out of its time budget before proving optimality at this
+  problem size. That's expected, not an error state.
+- **`wait_days` vs `mean_delay_days`**: `wait_days` isolates scheduler
+  behavior (relative to when a job became actionable); `mean_delay_days`
+  is relative to the job's original report day, which confounds
+  scheduler behavior with how overdue the job already was at day 0. If
+  you show only one of these two in a headline UI, use `wait_days`.
+- **Runs aren't bit-for-bit reproducible** for `solver_gt`/`solver_ml`
+  (parallel search, wall-clock cutoff) — rerunning the same scenario/
+  approach can give slightly different numbers. `baseline` is fully
+  deterministic.
+- **`jobs_unscheduled`** isn't a failure — jobs can legitimately not fit
+  in the horizon given gang/window capacity. It's a first-class metric to
+  display, and the specific unscheduled jobs are in `/schedule`'s
+  `unscheduled` list.
+
+## 9. Running the stack locally
+
+```
+docker compose up -d --build        # starts api (:8000) + postgres (:5432)
+curl localhost:8000/health          # sanity check
+docker compose exec api python -m alembic -c api/alembic.ini upgrade head   # if migrations aren't applied yet
+docker compose exec api python -m scripts.seed_demo   # populate the 3 demo scenarios (idempotent)
+```
+`src/`, `models/`, and `scripts/` are volume-mounted into the container —
+editing them locally takes effect without a rebuild. `api/` is baked into
+the image at build time, so changes there need `docker compose up -d --build`.
+
+## 10. Where the source of truth actually lives
+
+This document is a snapshot for onboarding. For anything authoritative —
+exact function signatures, every verified numeric finding, the full
+reasoning behind design decisions, migration history — go to `CLAUDE.md`
+at the repo root. It's organized chronologically by feature phase and is
+kept in sync with the code as it changes; this document is not
+guaranteed to be.

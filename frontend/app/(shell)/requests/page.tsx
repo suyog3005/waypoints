@@ -13,15 +13,15 @@ import { EmptyState } from '@/components/empty-state';
 import { formatDateTime } from '@/lib/format';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
+import { useBlockRequests, useTracks } from '@/lib/hooks';
 
 function RequestsContent() {
   const searchParams = useSearchParams();
   const status = searchParams.get('status');
 
-  // TODO: Wire with useBlockRequests hook once API endpoint is available
-  const isLoading = false;
-  const requests: any[] = [];
-  const error = null;
+  const { data: requests = [], isLoading, error } = useBlockRequests(status);
+  const { data: tracks = [] } = useTracks();
+  const trackCode = (id: string) => tracks.find((t) => t.id === id)?.code ?? id.slice(0, 8);
 
   return (
     <div>
@@ -85,9 +85,10 @@ function RequestsContent() {
                     <tr className="border-b">
                       <th className="text-left p-2 font-medium">Request ID</th>
                       <th className="text-left p-2 font-medium">Track</th>
-                      <th className="text-left p-2 font-medium">Type</th>
+                      <th className="text-left p-2 font-medium">Work Type</th>
+                      <th className="text-left p-2 font-medium">Class</th>
+                      <th className="text-left p-2 font-medium">Criticality</th>
                       <th className="text-left p-2 font-medium">Start</th>
-                      <th className="text-left p-2 font-medium">End</th>
                       <th className="text-left p-2 font-medium">Status</th>
                       <th className="text-left p-2 font-medium">Action</th>
                     </tr>
@@ -96,13 +97,12 @@ function RequestsContent() {
                     {requests.map((req) => (
                       <tr key={req.id} className="border-b hover:bg-accent">
                         <td className="p-2 font-medium">{req.id.slice(0, 8)}</td>
-                        <td className="p-2 text-muted-foreground">{req.track_id || '—'}</td>
-                        <td className="p-2">{req.request_type}</td>
+                        <td className="p-2 text-muted-foreground">{trackCode(req.track_id)}</td>
+                        <td className="p-2">{req.work_type || '—'}</td>
+                        <td className="p-2 capitalize">{req.block_class}</td>
+                        <td className="p-2 capitalize">{req.criticality}</td>
                         <td className="p-2 text-xs">
                           {formatDateTime(req.requested_start)}
-                        </td>
-                        <td className="p-2 text-xs">
-                          {formatDateTime(req.requested_end)}
                         </td>
                         <td className="p-2">
                           <StatusBadge status={req.status} />

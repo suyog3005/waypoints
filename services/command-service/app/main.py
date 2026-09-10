@@ -12,7 +12,7 @@ from fastapi import FastAPI
 
 from app.config import settings
 from app.kafka import KafkaPublisher
-from app.routers import block_requests, event_injection
+from app.routers import block_requests, event_injection, master_data
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,6 +33,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Command Service", lifespan=lifespan)
 app.include_router(block_requests.router)
 app.include_router(event_injection.router)
+app.include_router(master_data.router)
 
 
 @app.get("/health")

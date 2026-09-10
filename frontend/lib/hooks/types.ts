@@ -52,6 +52,25 @@ export interface TrainOut {
   synced_at: string; // ISO datetime
 }
 
+export interface ExecutionStateOut {
+  execution_state: string;
+  power_block_state: string;
+  granted_at: string | null;
+  grant_reason_code: string | null;
+  protected_at: string | null;
+  earthed_at: string | null;
+  earthed_by: string | null;
+  work_started_at: string | null;
+  work_ended_at: string | null;
+  handed_back_at: string | null;
+  handed_back_by: string | null;
+  fitness_declaration: string | null;
+  imposed_speed_kmph: number | null;
+  quantum_completed: number | null;
+  output_notes: string | null;
+  has_open_disconnection: boolean;
+}
+
 export interface BlockRequestResponse {
   id: string;
   department_id: string;
@@ -65,6 +84,35 @@ export interface BlockRequestResponse {
   is_emergency: boolean;
   submitted_at: string | null; // ISO datetime
   created_at: string; // ISO datetime
+  // Structured demand fields (OPUS-5 Part G).
+  block_class: string;
+  origin_type: string;
+  criticality: string;
+  consequence_of_deferral: string | null;
+  work_type: string | null;
+  quantum: number | null;
+  quantum_unit: string | null;
+  estimated_duration_minutes: number | null;
+  suggested_duration_minutes: number | null;
+  duration_confidence: string | null;
+  adjacent_line_status: string | null;
+  is_late: boolean;
+  lead_time_days: number | null;
+  // Execution + safety state (OPUS-5 Part H).
+  execution: ExecutionStateOut | null;
+}
+
+export interface DepartmentOut {
+  id: string;
+  name: string;
+  code: string;
+}
+
+export interface UserOut {
+  id: string;
+  full_name: string;
+  email: string;
+  department_id: string | null;
 }
 
 export interface TechnicalRequestPayload {
@@ -98,6 +146,16 @@ export interface BlockRequestCreate {
   affected_track_ids?: string[];
   technical?: TechnicalRequestPayload | null;
   operational?: OperationalRequestPayload | null;
+  // Structured demand fields (OPUS-5 Part G).
+  block_class?: string;
+  origin_type?: string;
+  criticality?: string;
+  consequence_of_deferral?: string | null;
+  work_type?: string | null;
+  quantum?: number | null;
+  quantum_unit?: string | null;
+  estimated_duration_minutes?: number | null;
+  adjacent_line_status?: string | null;
 }
 
 export interface BlockRequestUpdate {

@@ -7,6 +7,7 @@
 
 import { create } from 'zustand';
 import { subscribeWithSelector, persist } from 'zustand/middleware';
+import type { ViewMode } from '@/lib/map-data';
 
 export interface MapViewport {
   zoom: number;
@@ -40,8 +41,16 @@ export interface MapStore {
     blocks: boolean;
     restrictions: boolean;
     labels: boolean;
+    // OPUS-5 Part K layers (off by default, per K2 role defaults).
+    traction: boolean;
+    assets: boolean;
+    conflicts: boolean;
   };
   setLayerVisible: (layer: keyof MapStore['layersVisible'], visible: boolean) => void;
+
+  // OPUS-5 Part K1 — view mode (geographic / schematic / linear).
+  viewMode: ViewMode;
+  setViewMode: (mode: ViewMode) => void;
 }
 
 const defaultViewport: MapViewport = {
@@ -56,6 +65,9 @@ const defaultLayersVisible = {
   blocks: true,
   restrictions: true,
   labels: true,
+  traction: false,
+  assets: false,
+  conflicts: true,
 };
 
 /**
@@ -97,12 +109,17 @@ export const useMapStore = create<MapStore>()(
       set((state) => ({
         layersVisible: { ...state.layersVisible, [layer]: visible },
       })),
+
+    // OPUS-5 Part K1 — view mode
+    viewMode: 'geographic',
+    setViewMode: (mode) => set({ viewMode: mode }),
       }),
       {
         name: 'map-store',
         partialize: (state) => ({
           viewport: state.viewport,
           layersVisible: state.layersVisible,
+          viewMode: state.viewMode,
         }),
       }
     )

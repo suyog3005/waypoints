@@ -23,11 +23,38 @@ async def create_block_request(request: Request) -> Response:
     )
 
 
+@router.get("")
+async def list_block_requests(request: Request) -> Response:
+    return await forward(
+        request, "GET", "/block-requests", base_url=settings.command_service_url
+    )
+
+
+@router.get("/{request_id}")
+async def get_block_request(request: Request, request_id: str) -> Response:
+    return await forward(
+        request,
+        "GET",
+        f"/block-requests/{request_id}",
+        base_url=settings.command_service_url,
+    )
+
+
 @router.patch("/{request_id}")
 async def update_block_request(request: Request, request_id: str) -> Response:
     return await forward(
         request,
         "PATCH",
         f"/block-requests/{request_id}",
+        base_url=settings.command_service_url,
+    )
+
+
+@router.patch("/{request_id}/execution")
+async def update_execution_state(request: Request, request_id: str) -> Response:
+    return await forward(
+        request,
+        "PATCH",
+        f"/block-requests/{request_id}/execution",
         base_url=settings.command_service_url,
     )

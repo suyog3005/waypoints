@@ -14,10 +14,16 @@ docs/application_architecture_flow.md Sections 27-32):
 
 from db.models.base import Base
 from db.models.enums import (
+    AdjacentLineStatus,
+    BlockClass,
     ConstraintSeverity,
+    Criticality,
     EventSource,
+    ExecutionState,
     OptimizationRunStatus,
+    OriginType,
     PlanStatus,
+    PowerBlockState,
     RequestPriority,
     RequestStatus,
     RequestType,
@@ -44,6 +50,7 @@ from db.models.planning import (
     PlanItem,
 )
 from db.models.requests import (
+    BlockExecutionState,
     BlockRequest,
     BlockRequestAffectedTrack,
     OperationalRequest,
@@ -52,10 +59,16 @@ from db.models.requests import (
 
 __all__ = [
     "Base",
+    "AdjacentLineStatus",
+    "BlockClass",
     "ConstraintSeverity",
+    "Criticality",
     "EventSource",
+    "ExecutionState",
     "OptimizationRunStatus",
+    "OriginType",
     "PlanStatus",
+    "PowerBlockState",
     "RequestPriority",
     "RequestStatus",
     "RequestType",
@@ -81,6 +94,7 @@ __all__ = [
     "PlanItem",
     "BlockRequest",
     "BlockRequestAffectedTrack",
+    "BlockExecutionState",
     "OperationalRequest",
     "TechnicalRequest",
 ]

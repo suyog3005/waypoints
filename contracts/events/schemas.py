@@ -33,7 +33,12 @@ class OperationalRequestPayload(BaseModel):
 
 
 class BlockRequestPayload(BaseModel):
-    """Common fields for a block request, plus the type-specific extension."""
+    """Common fields for a block request, plus the type-specific extension.
+
+    The structured demand fields (block_class, origin_type, criticality,
+    work_type, quantum, ...) implement OPUS-5 Part G — they turn a free-text
+    request into a machine-plannable object (SR-002/004/006/007/009).
+    """
 
     department_id: uuid.UUID
     requested_by_user_id: uuid.UUID
@@ -46,6 +51,20 @@ class BlockRequestPayload(BaseModel):
     affected_track_ids: list[uuid.UUID] = Field(default_factory=list)
     technical: TechnicalRequestPayload | None = None
     operational: OperationalRequestPayload | None = None
+    # ── Structured demand fields (OPUS-5 Part G) ──
+    block_class: str = Field(default="routine")
+    origin_type: str = Field(default="ad_hoc")
+    criticality: str = Field(default="medium")
+    consequence_of_deferral: str | None = None
+    work_type: str | None = None
+    quantum: int | None = None
+    quantum_unit: str | None = None
+    estimated_duration_minutes: int | None = None
+    suggested_duration_minutes: int | None = None
+    duration_confidence: str | None = None
+    adjacent_line_status: str | None = None
+    is_late: bool = False
+    lead_time_days: int | None = None
 
 
 class OptimizationRequestPayload(BaseModel):
