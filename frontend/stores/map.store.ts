@@ -25,6 +25,7 @@ export interface MapStore {
   setZoom: (zoom: number) => void;
   setCenter: (center: { x: number; y: number }) => void;
   setExtent: (extent: MapViewport['extent']) => void;
+  resetViewport: () => void;
 
   // Feature selection
   selectedTrainId: string | null;
@@ -82,6 +83,7 @@ export const useMapStore = create<MapStore>()(
       set((state) => ({
         viewport: { ...state.viewport, extent },
       })),
+    resetViewport: () => set({ viewport: defaultViewport }),
 
     // Feature selection
     selectedTrainId: null,

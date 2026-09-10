@@ -21,6 +21,7 @@
 9. [Backend Services](#9--backend-services)
 10. [Caching & Optimization](#10--caching--optimization)
 11. [Phase 10 Implementation Plan](#11--phase-10-implementation-plan)
+12. [Brainstorm: Next-Generation Map Enhancements](#12--brainstorm-next-generation-map-enhancements-post-phase-10a)
 
 ---
 
@@ -758,6 +759,171 @@ Returns the static infrastructure graph (paginated).
 ```
 
 ### `POST /trainpositions`
+
+> Sections 10–11 (Caching & Optimization, Phase 10 Implementation Plan) are tracked
+> separately in [plan.md](./plan.md) and [agent.md](./agent.md). The remainder of this
+> document is a living brainstorm added after the Phase 10a live-browser review — see
+> Section 12 below.
+
+---
+
+# 12 — BRAINSTORM: NEXT-GENERATION MAP ENHANCEMENTS (Post Phase 10a)
+
+> **Context**: After Phase 10a shipped a working Maplibre map (base graph + trains +
+> blocks + restrictions, HTTP-polling real-time updates, viewport persistence), a live
+> review surfaced four gaps: (1) the demo network is a tiny, obviously-synthetic 5×4 grid
+> that doesn't stress-test the visualization, (2) there is no way to create a block
+> directly from the map, (3) data volume (40 nodes / 20 edges / 50 trains) is too small to
+> validate clustering, tiling, and performance claims made in Section 5, and (4) there is
+> no explicit test matrix for the map feature. This section brainstorms solutions to all
+> four, grounded in [application_architecture_flow.md](./application_architecture_flow.md)
+> Sections 17 (Shadow Finder), 19 (Track Dependency Analysis), 23 (Real-Time Event Flow),
+> and 29.6 (GIS/Network Map Visualization).
+
+## 12.1 Bigger, organically-random network topology
+
+**Problem**: `db/seed.py` currently generates a deterministic 5×4 grid (40 junction
+nodes, 20 edges, no stations, no branch lines, no loops). It looks like a test fixture,
+not a railway network, and it can't exercise edge cases like dense junction clusters,
+long single-track corridors, or disconnected sub-networks.
+
+**Brainstormed approach — procedural network generator**:
+
+1. **Backbone + branches generation algorithm** (new `db/network_gen.py`):
+   - Generate a main corridor as a randomized walk of N "trunk" stations spaced with
+     jittered distances (e.g. 8–25 km apart) instead of a fixed grid pitch.
+   - Attach 3–6 branch lines off random trunk stations, each with its own random length
+     (5–15 stations) and a random bearing (not orthogonal — use an angle jitter of
+     ±35° off the branch's initial direction) so the shape looks organic, not grid-like.
+   - Randomly add 2–4 **cross-links** (loop lines) connecting two otherwise-unconnected
+     branches — this creates real Track Dependency Analysis scenarios (Section 19: "a
+     block on one track may affect other tracks") because trains can be rerouted.
+   - Insert junction nodes at every branch point and station nodes at terminal/mid-branch
+     points; assign realistic `type` values (`station`, `junction`, `signal`) instead of
+     making everything a junction.
+   - Seed with a fixed RNG seed by default (reproducible for tests) but expose a
+     `--seed` CLI flag and a `--randomize` flag for demo/story-telling runs.
+2. **Scale target**: 300–800 nodes, 400–1000 edges (vs. current 40/20) — large enough to
+   need clustering (Section 7.1 "trains" layer) and tile-based polling (Section 5) to
+   actually matter, small enough to seed in a few seconds.
+3. **Geometry realism**: avoid perfectly straight edges between nodes — generate 1–3
+   intermediate waypoints per edge with small perpendicular jitter so rendered track
+   lines have gentle curves (closer to real rail alignments), consumed by the existing
+   `toLon`/`toLat` Cartesian→pseudo-lat/lng mapping already in `MapContainer.tsx`.
+4. **Validation invariants** the generator must guarantee (so downstream services don't
+   break): the graph is connected (no orphan sub-networks unless explicitly testing
+   that), every edge references two existing nodes, no duplicate edge ids, and node ids
+   are stable across re-seeds (needed for FK integrity in `Track`/`Block` tables).
+
+## 12.2 "Live add blocks on map" — interactive block creation
+
+**Problem**: Today a Block Request is only created via the `/requests` form. Section
+29.6 asks for a GIS/network map that speeds up _understanding_; the brainstorm extends
+that to _authoring_ — clicking directly on the map should let a planner draft a block.
+
+**Brainstormed interaction flow**:
+
+1. **Draw/select mode toggle** — a new map toolbar button ("Add Block") puts the map
+   into "select track" mode: hovering an edge highlights it, clicking selects it (or
+   shift-click to select a contiguous multi-edge corridor for a Corridor Block, Section
+   29.1).
+2. **Inline draft panel** — selecting track segment(s) opens a compact form docked to
+   the map (not a full-page navigation): start/end time pickers (defaulting to the
+   current business-clock time from `TimeControls.tsx`), reason/department dropdown,
+   and a live-computed list of "affected resources" (reuses Track Dependency Analysis,
+   Section 19) shown directly under the map as a preview before submit.
+3. **Submit → Command Service** — on submit, `POST /block-requests` is called (existing
+   Command Service endpoint) with `trackIds` derived from the selected edges' `trackId`
+   field (already present on `BaseGraphEdge`); the map optimistically renders the new
+   request as a dashed "planned/pending" overlay (reusing the existing `blocks-planned`
+   layer style from Section 7.1) until the real event round-trips through Kafka →
+   Optimization Service → Read Store (Section 21, Write Path) and the poller picks it up.
+4. **Shadow Finder preview on the map itself** — while drafting, call a (new, read-only)
+   `GET /shadow-finder/preview?trackIds=...&start=...&end=...` endpoint that runs the
+   existing Shadow Finder logic (Section 17) against in-flight + approved requests and
+   highlights any overlapping/mergeable existing block in a distinct color, with a
+   tooltip explaining the potential merge — this turns an abstract backend concept into
+   an immediate visual signal for the requester, before they even submit.
+5. **Undo / cancel** — drafts are pure client-side state (Zustand `blockDraftStore`)
+   until submit; canceling just clears the draft, no backend call needed.
+6. **Permissions** — the "Add Block" toolbar button is gated by RBAC (Section 29.12):
+   only roles allowed to create requests for the department scope of the selected track
+   see the button enabled; others see it disabled with a tooltip explaining why.
+
+## 12.3 Scaling data further
+
+**Problem**: 50 trains / 99 schedules is too small to validate polling/tiling claims in
+Section 5 and Section 6 ("Handles ~1000s of trains per tile" is asserted for RIVM but
+never actually tested against Team-Waypoints).
+
+**Brainstormed scale-up plan**:
+
+1. Bump seed data to **500–2,000 trains** and **5,000+ schedules**, distributed
+   unevenly across the new bigger network (busier trunk corridor, sparser branches) so
+   clustering (Section 7.1 `trains` layer, `ClusterRadius: 50px`) is actually exercised
+   at normal zoom levels, not just when zoomed far out.
+2. Add **synthetic delay/restriction noise**: randomly assign 5–10% of trains a delay
+   offset and randomly generate 10–30 active restrictions (Section 7.1 `restrictions`
+   layer) spread across the network so the map is never "too clean" — mirrors the event
+   injection work already done in Phase 11.
+3. **Load-test the polling loop** (Section 6.1) once data is scaled: measure `/trainpositions`
+   tile response time and payload size at 500/1000/2000 trains, and confirm Redis
+   cache-aside (Section 9) keeps p95 latency low; document actual numbers in this file
+   (replacing the currently-unverified "~200ms" RIVM comparison figure in Section 2.1).
+4. Keep seed generation idempotent and parameterized (`--trains=2000 --nodes=500`) so
+   CI/dev can still use a small fast dataset while demo/perf environments use the large one.
+
+## 12.4 Test-case coverage brainstorm
+
+A consolidated matrix to close testing gaps discovered during the Phase 10a live-browser
+session (see [agent.md](./agent.md) for the specific hydration/viewport/StrictMode bugs
+found and fixed):
+
+| Area                           | Test case                                                                                                                                           | Why it matters                                                                                                                                 |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Rendering lifecycle**        | Map renders base graph + trains on first load with no persisted `localStorage` state                                                                | Covers the "fresh user" path                                                                                                                   |
+|                                | Map recovers when persisted viewport is out-of-bounds/stale (Section 8 `mapStore`)                                                                  | Regression test for the exact bug found this session                                                                                           |
+|                                | Map survives a hydration-mismatch-triggering child update (e.g. a live clock) without losing the WebGL canvas                                       | Regression test for the `next/dynamic({ssr:false})` fix                                                                                        |
+|                                | Map init effect is resilient to React StrictMode double-invoke (mount→cleanup→mount) in dev                                                         | Prevents "blank map in dev only" bugs from recurring                                                                                           |
+| **Network topology**           | Generated network is fully connected (no orphan islands) at every random seed                                                                       | Guarantees routing/dependency analysis has a valid graph                                                                                       |
+|                                | Edge `trackId` values are unique/stable across re-seeds                                                                                             | FK integrity with `Track`/`Block` tables                                                                                                       |
+|                                | Rendering 800 nodes / 1000 edges stays interactive (pan/zoom) at 30+ fps                                                                            | Perf budget for the "bigger network" goal                                                                                                      |
+| **Trains & clustering**        | Trains cluster correctly at low zoom and un-cluster at high zoom without duplicate icons                                                            | Core Section 7.1 behavior                                                                                                                      |
+|                                | Time-travel slider (`TimeControls.tsx`) correctly filters trains via `filterByTime` at boundary timestamps (exactly at start/end)                   | Off-by-one bugs are easy here                                                                                                                  |
+|                                | Polling tile diffing (Section 5) sends unchanged-tile version and receives empty response, not full re-fetch                                        | Validates the whole tiling strategy actually saves bandwidth                                                                                   |
+| **Live block creation (12.2)** | Selecting a multi-edge corridor produces a single Corridor Block request (Section 29.1), not N separate ones                                        | Correctness of the new authoring flow                                                                                                          |
+|                                | Shadow Finder preview correctly flags an overlapping existing block before submit                                                                   | Validates Section 17 integration                                                                                                               |
+|                                | Draft state is discarded on cancel/navigate-away with no backend side effects                                                                       | No orphaned partial requests                                                                                                                   |
+|                                | RBAC-disabled users cannot submit even via direct API call (server-side check, not just UI-disabled button)                                         | OWASP: never trust client-side authorization alone                                                                                             |
+| **Real-time & events**         | A `track.status_*` Kafka event (Section 23) updates the map's restriction layer within one polling interval                                         | Validates the real-time adaptive loop end-to-end                                                                                               |
+|                                | Map does not flicker/reset viewport when new data arrives mid-pan                                                                                   | UX regression class                                                                                                                            |
+| **Resilience**                 | Map still renders base graph if `/trainpositions` fails (graceful degradation)                                                                      | Backend/network fault tolerance                                                                                                                |
+|                                | Map still renders if the external glyphs URL (Section 3.2) is unreachable — labels degrade, layout doesn't break                                    | Matches the 404-on-glyphs behavior already observed                                                                                            |
+| **Accessibility/testability**  | Map container and controls are reachable via keyboard and have appropriate ARIA labels                                                              | A11y baseline                                                                                                                                  |
+|                                | Canvas-based rendering is verifiable in automated tests via `map.isStyleLoaded()`/`loaded()` + screenshot diffing, not accessibility-tree snapshots | Canvas elements are invisible to a11y-tree tools (confirmed this session); document the correct verification technique for future contributors |
+
+## 12.5 Known environment caveat (documented for future contributors)
+
+During this session's live-browser verification, the map appeared completely blank in
+the automated Playwright browser used for testing. Root-causing traced this to the test
+harness's browser tab running with `document.visibilityState === "hidden"` permanently
+(confirmed via `requestAnimationFrame` never firing even after `page.bringToFront()`),
+which starves MapLibre GL's internal render loop — `'load'` never fires, independent of
+any application code. **This is a limitation of headless/backgrounded browser automation,
+not an application bug.** Two genuine bugs _were_ found and fixed along the way:
+
+1. A hydration mismatch (`TimeControls`'s live clock rendering different text on server
+   vs. client) was discarding/remounting the map's DOM subtree post-hydration — fixed by
+   loading `MapContainer` via `next/dynamic({ ssr: false })` instead of `<Suspense>`.
+2. A stale/out-of-bounds persisted viewport in `localStorage['map-store']` could strand
+   the camera outside the network's bounding box with no visual explanation — fixed with
+   a `resetViewport()` action, an auto-heal check in the `'load'` handler, and a manual
+   "Fit Network" button.
+
+Future live-browser verification of the map should use a real, focused desktop browser
+window (not an automated/headless tab) to confirm visual rendering, and can additionally
+assert `map.isStyleLoaded() === true` and `map.loaded() === true` programmatically as a
+secondary, environment-independent signal.
 
 Returns train positions for the given tiles (with versioning).
 

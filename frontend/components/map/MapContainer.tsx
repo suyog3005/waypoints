@@ -72,11 +72,13 @@ export function MapContainer({ baseGraph = MOCK_BASE_GRAPH }: MapContainerProps)
   const mapRef = useRef<maplibregl.Map | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const loadedRef = useRef(false);
+  const graphRef = useRef<BaseGraphData>(baseGraph);
 
   const viewport = useMapStore((s) => s.viewport);
   const setZoom = useMapStore((s) => s.setZoom);
   const setCenter = useMapStore((s) => s.setCenter);
   const setExtent = useMapStore((s) => s.setExtent);
+  const resetViewport = useMapStore((s) => s.resetViewport);
   const layersVisible = useMapStore((s) => s.layersVisible);
 
   // ── Data hooks (Phase 10a.4 / 10a.5) ─────────────────────────────────
@@ -86,6 +88,40 @@ export function MapContainer({ baseGraph = MOCK_BASE_GRAPH }: MapContainerProps)
 
   // Polling coordinator: computes visible tiles + polls train positions.
   const { positions, isLoading: trainsLoading, displayTime } = usePollingCoordinator();
+
+  // Keep a ref to the latest graph so imperative handlers (fitToNetwork,
+  // 'load' callback) always see current data without re-registering.
+  graphRef.current = graph;
+
+  /**
+   * Fit the camera to the base-graph's bounding box (with padding).
+   *
+   * Guards against the "blank map" failure mode: because viewport
+   * (zoom/center) is persisted to localStorage (Phase 10a.2), a user who
+   * pans/zooms away from the network — or a stale/corrupted persisted
+   * value — leaves the map looking at empty space on next load, with no
+   * visual cue that data exists elsewhere. This recenters/rescales to
+   * guarantee the whole network is always reachable in one click.
+   */
+  const fitToNetwork = () => {
+    const map = mapRef.current;
+    const nodes = graphRef.current.nodes;
+    if (!map || nodes.length === 0) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of nodes) {
+      if (n.x < minX) minX = n.x;
+      if (n.x > maxX) maxX = n.x;
+      if (n.y < minY) minY = n.y;
+      if (n.y > maxY) maxY = n.y;
+    }
+    map.fitBounds(
+      [
+        [toLon(minX), toLat(minY)],
+        [toLon(maxX), toLat(maxY)],
+      ],
+      { padding: 48, duration: 0 },
+    );
+  };
 
   // ── Init map (once) ──────────────────────────────────────────────────
   useEffect(() => {
@@ -124,11 +160,32 @@ export function MapContainer({ baseGraph = MOCK_BASE_GRAPH }: MapContainerProps)
 
     map.on('load', () => {
       loadedRef.current = true;
-      addBaseGraph(map, graph);
+      addBaseGraph(map, graphRef.current);
       addTrainLayers(map);
       addBlockLayers(map);
       addRestrictionLayers(map);
       wireMapInteractions(map);
+
+      // Self-heal a stale/out-of-bounds persisted viewport (see fitToNetwork
+      // doc comment): if the initial center sits far outside the network's
+      // bounding box, snap to a view that fits the whole network instead of
+      // rendering an empty viewport with no visual explanation.
+      const nodes = graphRef.current.nodes;
+      if (nodes.length > 0) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const n of nodes) {
+          if (n.x < minX) minX = n.x;
+          if (n.x > maxX) maxX = n.x;
+          if (n.y < minY) minY = n.y;
+          if (n.y > maxY) maxY = n.y;
+        }
+        const marginX = (maxX - minX) * 0.5 || 10_000;
+        const marginY = (maxY - minY) * 0.5 || 10_000;
+        const { x, y } = viewport.center;
+        const outOfBounds =
+          x < minX - marginX || x > maxX + marginX || y < minY - marginY || y > maxY + marginY;
+        if (outOfBounds) fitToNetwork();
+      }
     });
 
     return () => {
@@ -191,8 +248,19 @@ export function MapContainer({ baseGraph = MOCK_BASE_GRAPH }: MapContainerProps)
   return (
     <div className="relative h-full w-full overflow-hidden">
       <div ref={containerRef} className="h-full w-full" />
-      <div className="absolute right-3 top-3 z-10">
+      <div className="absolute right-3 top-3 z-10 flex flex-col items-end gap-2">
         <TimeControls />
+        <button
+          type="button"
+          onClick={() => {
+            resetViewport();
+            fitToNetwork();
+          }}
+          className="rounded-lg border bg-white/90 px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm backdrop-blur-sm hover:bg-white dark:bg-slate-900/90 dark:text-slate-300 dark:hover:bg-slate-900"
+          title="Recenter the map to show the entire network"
+        >
+          Fit Network
+        </button>
       </div>
       <div className="absolute bottom-3 left-3 top-3 z-10 w-64 overflow-y-auto">
         <MapSidebar />
