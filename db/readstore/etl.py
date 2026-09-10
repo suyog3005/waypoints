@@ -64,22 +64,53 @@ def _duration_minutes(start: datetime, end: datetime) -> int:
 
 
 def _track_geometry(tracks: list[Track]) -> dict[uuid.UUID, tuple[float, float, float, float]]:
-    """Assign each track a schematic (x1, y1, x2, y2) segment.
+    """Assign each track a schematic (x1, y1, x2, y2) segment on a large grid.
 
-    The Operational DB stores tracks as abstract segments (``segment_start`` /
-    ``segment_end`` are free-text, not coordinates). For the MVP map we lay the
-    network out on a simple grid: each track is a horizontal segment placed on
-    its own row, 10 km long, spaced 2.5 km apart. This is a *schematic* layout
-    (not geographic) — good enough to render a readable network and to compute
-    tile boundaries. A real deployment would read coordinates from a GIS source.
+    The Operational DB stores tracks as abstract segments. For the MVP map we lay
+    the network out on a grid where:
+    - Rows (Y-axis) represent parallel lines (UP Main, DOWN Main, Goods, Sidings).
+    - Columns (X-axis) represent sections (North, Central, South, Express).
+
+    Each grid cell is 40 km × 20 km, creating a large, complex network. Tracks are
+    drawn as lines connecting two grid cells. This is a *schematic* layout suitable
+    for rendering a busy, realistic rail network. A real deployment would read
+    geographic coordinates from GIS.
     """
     geometry: dict[uuid.UUID, tuple[float, float, float, float]] = {}
-    row = 0
+
+    # Parse track codes like "TRK-A1", "TRK-B2" -> (row_letter, col_num)
+    # Then map to grid coordinates
     for t in tracks:
-        y = row * 2_500.0
-        geometry[t.id] = (0.0, y, 10_000.0, y)
-        row += 1
+        code = t.code
+        # Extract row (A-Z) and column (1-9)
+        try:
+            parts = code.split("-")
+            if len(parts) >= 2:
+                row_col = parts[1]  # e.g., "A1", "B2"
+                row_letter = row_col[0]  # "A", "B", etc.
+                col_num = int(row_col[1:])  # 1, 2, 3, etc.
+
+                row = ord(row_letter) - ord("A")  # 0, 1, 2, 3, 4
+                col = col_num - 1  # 0, 1, 2, 3
+            else:
+                # Fallback: simple linear assignment
+                row, col = 0, 0
+        except (ValueError, IndexError):
+            row, col = 0, 0
+
+        # Grid spacing: 40 km × 20 km per cell
+        cell_width = 40_000.0
+        cell_height = 20_000.0
+
+        # Each track spans multiple columns within its row (40 km)
+        x1 = col * cell_width
+        x2 = (col + 1) * cell_width
+        y = row * cell_height + 10_000.0  # Center of the row
+
+        geometry[t.id] = (x1, y, x2, y)
+
     return geometry
+
 
 
 # Tile-ID / time-bucket helpers live in ``db.readstore.tiling`` (shared with the

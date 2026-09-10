@@ -380,12 +380,52 @@ when a phase's tasks are finished.
 
 > Newest entries at the top. One entry per agent turn that changes the repo.
 
+### 2026-09-10 — Phase 11 Started (Real-Time Loop Wiring & Event Injection)
+
+- **Phase 11 Status**: ⏳ IN PROGRESS
+- **Objective**: Verify the complete event-driven pipeline works end-to-end: event → optimizer re-run → DB update → ETL → cache invalidation → frontend refresh.
+- **New Files Created**:
+  - `services/command-service/app/routers/event_injection.py` — Event injector endpoints:
+    - `POST /inject/train-delay` — Publish a TrainDelay event to TRAIN_EVENTS topic
+    - `POST /inject/trigger-optimization` — Publish an OptimizationRequested event to OPTIMIZATION_REQUESTS topic
+    - Both return event details (event_id, payload, timestamp) for verification
+  - `_phase11_loop_test.py` — Comprehensive verification script:
+    - Pre-flight checks: Command Service, Query Service, Operational DB online
+    - Run N iterations (default 5):
+      1. Inject train delay event
+      2. Trigger optimization
+      3. Wait for optimization to complete (polls Operational DB for new plans)
+      4. Run ETL sync (Operational DB → Read Store)
+      5. Verify Query Service returns updated plans
+    - Final summary: passed/failed count, deterministic behavior check
+- **Modified Files**:
+  - `services/command-service/app/main.py` — Added import + include_router for event_injection
+  - `docs/plan.md` — Updated Phase 11 description with detailed workflow; marked Phases 10b, 10c, 12–15 as deferred/future
+- **Expected Loop Flow**:
+  ```
+  POST /inject/train-delay
+    ↓ (event published to TRAIN_EVENTS topic)
+  POST /inject/trigger-optimization
+    ↓ (event published to OPTIMIZATION_REQUESTS topic)
+  Optimization Service consumes → runs planner
+    ↓
+  Plan + Blocks created in Operational DB
+    ↓
+  ETL syncs Operational DB → Read Store
+    ↓
+  Query Service cache invalidated (Redis TTL on /plans)
+    ↓
+  Frontend polls /plans → sees new plan
+  ```
+- **Status**: Event injector endpoints + test script ready. Pending: service startup and test execution.
+- **Next Action**: Run `python _phase11_loop_test.py --iterations 5` (after all services online) to verify the loop 5+ times.
+
 ### 2026-09-10 — Phase 10a.10 Complete (Integration Testing — 5 bugs found & fixed)
 
 - **Phase 10a.10 Status**: ✅ COMPLETE — full E2E verified against live local PostgreSQL (Operational `waypoints` + Read Store `waypoints_read`; no Redis → Query Service runs cache-off).
 - **Environment**: Local PostgreSQL 18 (Docker/Rancher daemon would not start). Credentials `postgres` / `ColdVagabond@30` (URL-encode `@` as `%40`; in the Alembic env var use `%%40` to survive configparser interpolation). Python via `uv` (Siemens Artifactory unreachable → `uv run --default-index https://pypi.org/simple`). Services import the shared `db` package from repo root → set `PYTHONPATH=<repo root>`.
 - **Bug 1 — duplicate `CREATE TYPE` (Operational migration)**: `db/migrations/versions/0001_initial_schema.py` manually looped `enum_type.create(bind, checkfirst=True)` AND `op.create_table` auto-emits `CREATE TYPE` for named-enum columns → `DuplicateObject` on a fresh DB. Removed the manual loop. Verified: generated SQL now has 7 unique `CREATE TYPE` (was 14).
-- **Bug 2 — multi-bucket tiling**: a position was stored only in its `from_time` bucket tile, but the frontend requests the *current display-time* bucket, so a train active 19:06–23:06 UTC was invisible at 20:00. Added `position_tiles(x, y, from_time, to_time) -> list[str]` (every 15-min bucket in the span) to `db/readstore/tiling.py`; ETL `_build_data_tiles` now counts each position in every spanned tile; Query Service `train_positions.py` groups positions by every spanned tile.
+- **Bug 2 — multi-bucket tiling**: a position was stored only in its `from_time` bucket tile, but the frontend requests the _current display-time_ bucket, so a train active 19:06–23:06 UTC was invisible at 20:00. Added `position_tiles(x, y, from_time, to_time) -> list[str]` (every 15-min bucket in the span) to `db/readstore/tiling.py`; ETL `_build_data_tiles` now counts each position in every spanned tile; Query Service `train_positions.py` groups positions by every spanned tile.
 - **Bug 3 — missing CORS on API Gateway**: frontend (localhost:3003) fetches cross-origin from localhost:8000; preflight `OPTIONS /basegraph` returned 405. Added `cors_origins` (localhost/127.0.0.1 :3000–3003) to `services/api-gateway/app/config.py` and `CORSMiddleware` (added LAST = outermost, so it answers preflight before auth) in `app/main.py`. Verified: preflight 200 with `Access-Control-Allow-Origin: http://localhost:3003`.
 - **Bug 4 — delta-transfer wipe (trains disappeared)**: response was a flat `positions` list; an unchanged-tile poll returned 0 positions and the frontend replaced state with empty → trains vanished. Changed `TrainPositionsResponse` to `tiles: dict[str, list[TrainPositionOut]]` (grouped by tile, the delta unit) in `services/query-service/app/schemas.py` + router; frontend `use-train-positions.ts` type updated; `use-polling-coordinator.ts` now keeps a per-tile cache (`tilePositionsRef`) and merges deltas (replace per-tile, prune non-visible, flatten). Verified: first poll `{'0_0_...': 3}`, unchanged poll `{}` (no wipe).
 - **Bug 5 — infinite re-render loop (frontend, surfaced during testing)**: "Maximum update depth exceeded" in `tile.store.ts`. `updateTileVersion` created a new Map every poll → `tileVersionCache` ref changed → `tiles` useMemo recomputed → merge effect (dep `tiles`) re-ran → `updateTileVersion` again → loop. Fixed two ways: (a) `updateTileVersion` is now a no-op when the version is unchanged (`frontend/stores/tile.store.ts`); (b) the merge effect no longer depends on `tiles` — visible IDs are read from a ref (`visibleIdsRef`) so the effect only runs when `data` changes (`frontend/lib/hooks/use-polling-coordinator.ts`).

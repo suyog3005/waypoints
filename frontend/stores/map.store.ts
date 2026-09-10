@@ -44,8 +44,8 @@ export interface MapStore {
 }
 
 const defaultViewport: MapViewport = {
-  zoom: 10,
-  center: { x: 0, y: 0 },
+  zoom: 7,
+  center: { x: 80_000, y: 50_000 },  // Center of the expanded grid network (160×100 km)
   extent: undefined,
 };
 

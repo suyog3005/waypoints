@@ -369,7 +369,7 @@ _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md
 
 #### Phase 10b — Advanced Visualization Features
 
-_Estimated 10 days (future phase)._
+_Deferred / future phase (post-MVP)._
 
 1. WebSocket upgrade: replace HTTP polling with `/stream/trainpositions?tiles=[...]` for lower latency (1–2 sec).
 2. Restriction overlays: render colored poly-lines on affected track segments (speed, blockage, adhesion).
@@ -378,11 +378,9 @@ _Estimated 10 days (future phase)._
 5. Block occupancy visualization: color-code block segments by occupancy status (occupied → orange, planned → yellow, available → gray).
 6. Improved popover/tooltip system: hover train → show delay, ETA, platform track; hover restriction → show details.
 
-**Output:** Polished, high-performance map suitable for real-time dispatch workflows.
-
 #### Phase 10c — Optimization & Polish
 
-_Estimated 5+ days (future phase)._
+_Deferred / future phase (post-MVP)._
 
 1. Worker thread for tile computation (offload geometric calculations from main thread).
 2. Tile pre-fetching: load adjacent tiles as user pans for smoother experience.
@@ -390,30 +388,76 @@ _Estimated 5+ days (future phase)._
 4. Accessibility: keyboard navigation (arrow keys to pan, +/– to zoom), screen reader support for train positions.
 5. Performance audit: measure map render time, tile transfer time, identify bottlenecks.
 
-### Phase 11 — Real-Time Loop Wiring & Event Injection
+### Phase 11 — Real-Time Loop Wiring & Event Injection ⏳ IN PROGRESS
 
 _Depends on Phases 5, 7, 10._
 
-1. Build a small "event injector" script/endpoint to simulate a train-delay or track-status event.
+**Objective:** Verify the complete event-driven pipeline works end-to-end.
+
+1. Build event injector endpoints to simulate operational events (train delays, track status).
 2. Verify the full loop: event → optimizer re-run → DB update → ETL → cache invalidation → frontend refresh (architecture Section 23).
 3. Run the loop 5+ times to confirm deterministic behavior under repeated optimizations.
 
+**Phase 11 Implementation:**
+
+1. **Event Injector Endpoints** (in `/services/command-service/app/routers/event_injection.py`):
+   - `POST /inject/train-delay`: Simulate a train delay event, publish to TRAIN_EVENTS topic
+   - `POST /inject/trigger-optimization`: Manually trigger optimizer, publish to OPTIMIZATION_REQUESTS topic
+   - Both return event details (event_id, payload, timestamp)
+
+2. **Loop Verification Script** (in `_phase11_loop_test.py`):
+   - Pre-flight checks: Command Service, Query Service, Operational DB online
+   - For each iteration (5 iterations default):
+     1. Inject a train delay event
+     2. Trigger optimization
+     3. Wait for optimization to complete (polls Operational DB for new plans)
+     4. Run ETL sync (Operational DB → Read Store)
+     5. Verify Query Service returns updated plans
+   - Summary: passed/failed count
+
+**Expected Flow (per iteration):**
+```
+POST /inject/train-delay
+  ↓ (event published to TRAIN_EVENTS)
+POST /inject/trigger-optimization
+  ↓ (event published to OPTIMIZATION_REQUESTS)
+Optimization Service consumes → runs planner
+  ↓
+Plan + Blocks created in Operational DB
+  ↓
+ETL syncs Operational DB → Read Store
+  ↓
+Query Service cache invalidated (Redis TTL on /plans)
+  ↓
+Frontend polls /plans → sees new plan
+  ↓
+Map re-renders with updated blocks
+```
+
+**Command to Run Test:**
+```bash
+# Start all services first, then:
+python _phase11_loop_test.py --iterations 5 --delay 15
+```
+
+**Status:** Event injector endpoints implemented; test script ready. Pending: service startup and test execution.
+
 ### Phase 12 — Docker Compose Full Stack
 
-_Depends on all services existing._
+_Deferred / future phase (post-MVP)._
 
 1. Compose file wiring Postgres, Kafka, Redis, all four backend services, and the
    frontend — a single `docker compose up` should run everything locally.
 
 ### Phase 13 — CI Pipeline
 
-_Depends on Phase 12._
+_Deferred / future phase (post-MVP)._
 
 1. GitHub Actions workflow: lint + unit test each service, build Docker images.
 
 ### Phase 14 — Testing & Verification
 
-_Can run in parallel with Phase 13; depends on the respective implementation phases._
+_Deferred / future phase (post-MVP)._
 
 1. Unit tests: Command Service validation, optimizer merge logic, Query Service
    cache-aside behavior.
@@ -422,7 +466,7 @@ _Can run in parallel with Phase 13; depends on the respective implementation pha
 
 ### Phase 15 — Documentation & Demo Prep
 
-_Last phase._
+_Deferred / future phase (post-MVP)._
 
 1. Update the root README with run instructions.
 2. Write a demo walkthrough script (for judges/reviewers) referencing this plan and
