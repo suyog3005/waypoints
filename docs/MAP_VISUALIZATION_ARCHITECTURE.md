@@ -22,6 +22,12 @@
 10. [Caching & Optimization](#10--caching--optimization)
 11. [Phase 10 Implementation Plan](#11--phase-10-implementation-plan)
 12. [Brainstorm: Next-Generation Map Enhancements](#12--brainstorm-next-generation-map-enhancements-post-phase-10a)
+    - [12.1 Bigger, organically-random network topology](#121-bigger-organically-random-network-topology)
+    - [12.1a Procedural curved track geometry](#121a-procedural-curved-track-geometry--organic-waypoint-interpolation)
+    - [12.2 "Live add blocks on map"](#122-live-add-blocks-on-map--interactive-block-creation)
+    - [12.3 Scaling data further](#123-scaling-data-further)
+    - [12.4 Test-case coverage brainstorm](#124-test-case-coverage-brainstorm)
+    - [12.5 Known environment caveat](#125-known-environment-caveat-documented-for-future-contributors)
 
 ---
 
@@ -814,6 +820,104 @@ long single-track corridors, or disconnected sub-networks.
    break): the graph is connected (no orphan sub-networks unless explicitly testing
    that), every edge references two existing nodes, no duplicate edge ids, and node ids
    are stable across re-seeds (needed for FK integrity in `Track`/`Block` tables).
+
+### 12.1a Procedural curved track geometry — organic waypoint interpolation
+
+**Motivation**: Real railway tracks are rarely perfectly straight over long distances —
+they curve gently through valleys, around hills, and to follow existing right-of-ways.
+The current `db/seed.py` produces Manhattan-grid straight edges that look synthetic on
+the map. To make the network visually and geometrically convincing, track edges should
+render as smooth curves with 2–4 intermediate waypoints per edge, not just straight
+lines between nodes.
+
+**Algorithm for generating curved track geometry**:
+
+1. **For each edge** in the generated network (from node A to node B):
+   - Compute the straight-line distance `d = distance(A, B)` and bearing `θ = bearing(A, B)`.
+   - Divide the edge into `numSegments = max(2, ceil(d / 5000))` sub-segments (e.g. no
+     segment longer than 5 km to maintain curve smoothness).
+   - For each segment i ∈ [1, numSegments-1]:
+     - Compute the segment's midpoint along the straight line.
+     - Generate a perpendicular deflection: `deflection = random(-d*0.08, d*0.08)` (±8%
+       of edge length, varying per run).
+     - Perturb the midpoint perpendicular to the A→B bearing by `deflection` meters.
+     - This becomes an **intermediate waypoint** that curves the track away from the
+       straight line.
+   - Store the sequence: [A, waypoint_1, waypoint_2, ..., waypoint_n, B].
+
+2. **Rendering the curved edges**:
+   - When inserting edge geometry into the Maplibre `sources.edges`, use the waypoint
+     sequence (not just the two endpoints) as a LineString in the GeoJSON feature.
+   - Maplibre will automatically render a polyline through all waypoints, producing a
+     smooth, organic-looking curve.
+   - Maplibre's line rendering can optionally enable line-join: "round" and line-cap:
+     "round" for even smoother visual appeal.
+
+3. **Parametrization for controlled realism**:
+   - **Deflection magnitude** (`±d*0.08`): Controls how wiggly tracks are.
+     - 0% → perfectly straight (current behavior, too synthetic).
+     - 5–8% → gentle realistic curves (recommended for railway aesthetics).
+     - 10%+ → exaggerated curves (OK for stylized/game-like aesthetic, but harder to read).
+   - **Segment length** (5000 m): Shorter segments allow tighter curves; longer segments
+     produce sweeping gentle curves. Tune based on zoom level and network scale.
+   - **Randomness seed**: Use the edge ID as a component of the RNG seed (e.g.
+     `seed = hash(edgeId) + masterSeed`) so waypoints are reproducible per edge but
+     different from other edges.
+
+4. **Database schema adjustment**:
+   - The `Track` table's geometry column (currently storing just the two endpoints) should
+     be extended to store the full waypoint sequence as a LineString or encoded polyline.
+   - Alternatively, compute waypoints on-the-fly in `MapContainer.tsx` using the edge's
+     `from`/`to` node IDs and a stored curve seed/deflection parameter.
+   - Latency: pre-computing and storing is better (no render-time computation); on-the-fly
+     is simpler if waypoint generation is deterministic and fast.
+
+5. **Visual verification**:
+   - Open the map in a real browser (not headless automation; see Section 12.5).
+   - Pan to a high-zoom level where you can see individual edges clearly.
+   - Verify that edges show as smooth curves, not straight lines.
+   - Verify that trains (markers) follow the curved tracks when positioned at various
+     points along the edges (e.g., by checking `map.querySourceFeatures()` for edge
+     coordinates at train positions).
+
+**Example deflection pattern** (pseudo-code):
+
+```python
+def generateCurvedEdgeGeometry(nodeA, nodeB, edgeId, masterSeed=12345):
+    """Generate waypoints for a curved track between two nodes."""
+    distance = euclidean(nodeA, nodeB)
+    bearing = atan2(nodeB.y - nodeA.y, nodeB.x - nodeA.x)
+    
+    numSegments = max(2, ceil(distance / 5000))
+    waypoints = [nodeA]
+    
+    edgeRng = Random(hash(edgeId) + masterSeed)
+    
+    for i in range(1, numSegments):
+        t = i / numSegments  # parameter [0, 1]
+        midpoint = lerp(nodeA, nodeB, t)  # linear interpolation
+        
+        # Perpendicular direction (rotated 90° from bearing)
+        perpBearing = bearing + pi / 2
+        
+        # Random deflection magnitude: ±8% of total distance
+        deflectionMagnitude = edgeRng.uniform(-0.08 * distance, 0.08 * distance)
+        
+        # Apply deflection perpendicular to the main bearing
+        waypointX = midpoint.x + deflectionMagnitude * cos(perpBearing)
+        waypointY = midpoint.y + deflectionMagnitude * sin(perpBearing)
+        
+        waypoints.append(Point(waypointX, waypointY))
+    
+    waypoints.append(nodeB)
+    return waypoints  # LineString: [A, wp1, wp2, ..., B]
+```
+
+This approach ensures:
+- **Deterministic reproducibility** — same edge ID + seed = same curve every time.
+- **Visual realism** — gentle organic curves that look like real railway alignment.
+- **Scalability** — fast O(segments) computation, no external geometry libraries required.
+- **Integration** — works seamlessly with the existing Maplibre GeoJSON/LineString rendering.
 
 ## 12.2 "Live add blocks on map" — interactive block creation
 
