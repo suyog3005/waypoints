@@ -36,22 +36,22 @@ async def inject_train_delay(
     publisher = Depends(get_publisher),
 ) -> dict:
     """Inject a train delay event to test the real-time loop.
-    
+
     Publishes a TrainDelay event to TRAIN_EVENTS topic, which may trigger
     re-optimization (full wiring deferred; for now, manually trigger
     /trigger-optimization).
-    
+
     Args:
         train_id: UUID of train to delay (optional; random if omitted)
         delay_minutes: How many minutes late (default 15)
         reason: Human-readable reason
-    
+
     Returns:
         Event details (event_id, train_id, delay_minutes, timestamp)
     """
     if not publisher:
         raise HTTPException(status_code=503, detail="Kafka publisher not available")
-    
+
     # If no train_id, pick a random train from the DB
     if not train_id:
         from db.models import Train
@@ -65,7 +65,7 @@ async def inject_train_delay(
             train_id_uuid = uuid.UUID(train_id)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid train_id UUID")
-    
+
     # Create and publish the event
     event = make_event(
         TrainDelay,
@@ -77,7 +77,7 @@ async def inject_train_delay(
         },
         occurred_at=datetime.now(timezone.utc),
     )
-    
+
     try:
         from contracts.events.topics import Topics
         await publisher.send_and_wait(
@@ -94,7 +94,7 @@ async def inject_train_delay(
     except Exception as exc:
         logger.error("Failed to publish train delay event: %s", exc)
         raise HTTPException(status_code=500, detail=f"Kafka publish failed: {exc}")
-    
+
     return {
         "event_id": str(event.event_id),
         "event_type": event.event_type,
@@ -114,36 +114,36 @@ async def trigger_optimization(
     publisher = Depends(get_publisher),
 ) -> dict:
     """Manually trigger the optimizer to re-plan a track or section.
-    
+
     Publishes an OptimizationRequested event to OPTIMIZATION_REQUESTS topic,
     which will cause the optimization service to re-run and produce a new Plan.
-    
+
     Args:
         track_id: UUID of track to re-optimize (optional)
         section_id: UUID of section to re-optimize (optional)
         reason: Human-readable reason for re-optimization
-    
+
     Returns:
         Event details (event_id, track_id, section_id, timestamp)
     """
     if not publisher:
         raise HTTPException(status_code=503, detail="Kafka publisher not available")
-    
+
     track_uuid = None
     section_uuid = None
-    
+
     if track_id:
         try:
             track_uuid = uuid.UUID(track_id)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid track_id UUID")
-    
+
     if section_id:
         try:
             section_uuid = uuid.UUID(section_id)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid section_id UUID")
-    
+
     # Create and publish the event
     event = make_event(
         OptimizationRequested,
@@ -155,7 +155,7 @@ async def trigger_optimization(
         },
         occurred_at=datetime.now(timezone.utc),
     )
-    
+
     try:
         from contracts.events.topics import Topics
         await publisher.send_and_wait(
@@ -172,7 +172,7 @@ async def trigger_optimization(
     except Exception as exc:
         logger.error("Failed to publish optimization request: %s", exc)
         raise HTTPException(status_code=500, detail=f"Kafka publish failed: {exc}")
-    
+
     return {
         "event_id": str(event.event_id),
         "event_type": event.event_type,

@@ -1,12 +1,21 @@
 # Local development infrastructure.
 #
 # Phase 4: Postgres, Redpanda (Kafka-compatible broker), Redis.
-# Phase 11 will add the application services (api-gateway, command-service,
-# query-service, optimization-service, frontend).
+# Phase 12: Full-stack orchestration with all application services.
 #
 # Usage:
 #   docker compose -f infra/docker-compose.yml up -d
-#   python infra/bootstrap_topics.py   # create Kafka topics
+#   python infra/bootstrap_topics.py   # create Kafka topics (once all services are healthy)
+#
+# Services:
+#   - postgres: Operational DB (block_planning) + Read Store (block_planning_read)
+#   - redpanda: Kafka-compatible broker
+#   - redis: Cache store
+#   - api-gateway: reverse proxy for reads/writes (port 8000)
+#   - command-service: write path, event publishing (port 8001)
+#   - query-service: read path, cache-aside (port 8002)
+#   - optimization-service: Kafka consumer, optimizer (no HTTP port)
+#   - frontend: Next.js React app (port 3004)
 #
 # See docs/plan.md for the phase breakdown.
 
@@ -60,5 +69,109 @@ services:
       timeout: 3s
       retries: 5
 
+  # Application Services (Phase 12)
+
+  command-service:
+    build:
+      context: ../services/command-service
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/block_planning
+      KAFKA_BROKERS: redpanda:9092
+      KAFKA_ENABLED: "true"
+      PORT: 8001
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - app-network
+
+  query-service:
+    build:
+      context: ../services/query-service
+      dockerfile: Dockerfile
+    environment:
+      READ_STORE_URL: postgresql://postgres:postgres@postgres:5432/block_planning_read
+      REDIS_URL: redis://redis:6379
+      PORT: 8002
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - app-network
+
+  api-gateway:
+    build:
+      context: ../services/api-gateway
+      dockerfile: Dockerfile
+    environment:
+      COMMAND_SERVICE_URL: http://command-service:8001
+      QUERY_SERVICE_URL: http://query-service:8002
+      PORT: 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      command-service:
+        condition: service_healthy
+      query-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - app-network
+
+  optimization-service:
+    build:
+      context: ../services/optimization-service
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/block_planning
+      KAFKA_BROKERS: redpanda:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3004:3000"
+    depends_on:
+      - api-gateway
+    networks:
+      - app-network
+
 volumes:
   pgdata:
+
+networks:
+  app-network:
+    driver: bridge

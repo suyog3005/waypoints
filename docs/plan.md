@@ -416,6 +416,7 @@ _Depends on Phases 5, 7, 10._
    - Summary: passed/failed count
 
 **Expected Flow (per iteration):**
+
 ```
 POST /inject/train-delay
   ↓ (event published to TRAIN_EVENTS)
@@ -435,6 +436,7 @@ Map re-renders with updated blocks
 ```
 
 **Command to Run Test:**
+
 ```bash
 # Start all services first, then:
 python _phase11_loop_test.py --iterations 5 --delay 15
@@ -442,12 +444,45 @@ python _phase11_loop_test.py --iterations 5 --delay 15
 
 **Status:** Event injector endpoints implemented; test script ready. Pending: service startup and test execution.
 
-### Phase 12 — Docker Compose Full Stack
+### Phase 12 — Docker Compose Full Stack ⏳ IN PROGRESS
 
-_Deferred / future phase (post-MVP)._
+_Depends on Phases 0–11._
 
-1. Compose file wiring Postgres, Kafka, Redis, all four backend services, and the
-   frontend — a single `docker compose up` should run everything locally.
+**Objective**: Enable `docker compose up` to orchestrate the entire system locally.
+
+**Implementation**:
+1. **Updated `/infra/docker-compose.yml`**:
+   - Added `api-gateway` service (port 8000) — depends on command-service & query-service
+   - Added `command-service` service (port 8001) — depends on postgres & redpanda
+   - Added `query-service` service (port 8002) — depends on postgres & redis
+   - Added `optimization-service` (Kafka consumer, no HTTP port) — depends on postgres & redpanda
+   - Added `frontend` service (port 3004 mapped to internal 3000) — depends on api-gateway
+   - Created `app-network` bridge network for inter-service communication
+   - All services have healthchecks; dependencies ensure correct startup order
+
+2. **Created Dockerfile files**:
+   - `services/command-service/Dockerfile` — Python 3.12-slim, installs db + contracts + requirements, runs uvicorn on :8001
+   - `services/query-service/Dockerfile` — Python 3.12-slim, installs db + contracts + requirements, runs uvicorn on :8002
+   - `services/api-gateway/Dockerfile` — Python 3.12-slim, installs db + contracts + requirements, runs uvicorn on :8000
+   - `services/optimization-service/Dockerfile` — Python 3.12-slim, runs Kafka consumer loop (no HTTP)
+   - `frontend/Dockerfile` — Multi-stage: builds Next.js, then runs production image
+
+**Usage**:
+```bash
+docker compose -f infra/docker-compose.yml up -d   # Start full stack
+python infra/bootstrap_topics.py                     # Create Kafka topics
+# Wait for all services to be healthy, then:
+python _phase11_loop_test.py --iterations 5 --delay 15  # Verify real-time loop
+```
+
+**Expected Behavior**:
+- All services start in dependency order (infra first: postgres, redpanda, redis; then backends: command, query, api-gateway; then optimization & frontend)
+- Healthchecks confirm readiness
+- Frontend accessible at `http://localhost:3004`
+- API Gateway accessible at `http://localhost:8000`
+- Backend services communicate over internal network (redpanda.9092, postgres.5432, etc.)
+
+**Status**: Docker Compose file updated + all Dockerfiles created. Pending: local testing with `docker compose up`.
 
 ### Phase 13 — CI Pipeline
 

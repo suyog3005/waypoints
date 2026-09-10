@@ -84,7 +84,7 @@ def trigger_optimization() -> dict:
 def run_etl() -> dict:
     """Run the Read Store ETL to sync Operational DB → Read Store."""
     from db.readstore.etl import sync_read_store
-    
+
     logger.info("Running ETL sync...")
     try:
         counts = sync_read_store()
@@ -99,7 +99,7 @@ def verify_plan_in_db() -> int:
     """Check how many plans exist in the Operational DB."""
     from db.models import Plan
     from db.session import SessionLocal
-    
+
     with SessionLocal() as session:
         count = session.query(Plan).count()
         logger.info(f"Plans in Operational DB: {count}")
@@ -126,7 +126,7 @@ def wait_for_optimization(timeout_sec: int = 10) -> bool:
     logger.info(f"Waiting up to {timeout_sec}s for optimization to complete...")
     start = time.time()
     last_count = verify_plan_in_db()
-    
+
     while time.time() - start < timeout_sec:
         time.sleep(1)
         current_count = verify_plan_in_db()
@@ -134,7 +134,7 @@ def wait_for_optimization(timeout_sec: int = 10) -> bool:
             logger.info(f"✓ Optimization completed: {last_count} → {current_count} plans")
             return True
         last_count = current_count
-    
+
     logger.warning(f"Optimization did not complete within {timeout_sec}s")
     return False
 
@@ -144,37 +144,37 @@ def run_iteration(iteration_num: int, delay_minutes: int = 15) -> bool:
     logger.info(f"\n{'='*70}")
     logger.info(f"ITERATION {iteration_num}")
     logger.info(f"{'='*70}")
-    
+
     try:
         # 1. Inject event
         logger.info("Step 1: Injecting train delay event...")
         event = inject_train_delay(delay_minutes)
         logger.info(f"  ✓ Event injected: {event['event_id']}")
-        
+
         # 2. Trigger optimization
         logger.info("Step 2: Triggering optimization...")
         opt_event = trigger_optimization()
         logger.info(f"  ✓ Optimization triggered: {opt_event['event_id']}")
-        
+
         # 3. Wait for optimization to complete
         logger.info("Step 3: Waiting for optimization...")
         if not wait_for_optimization(timeout_sec=15):
             logger.warning("  ⚠ Optimization may not have completed")
-        
+
         # 4. Run ETL to sync Read Store
         logger.info("Step 4: Syncing Read Store via ETL...")
         etl_result = run_etl()
         logger.info(f"  ✓ ETL sync complete: {etl_result}")
-        
+
         # 5. Verify Query Service has updated data
         logger.info("Step 5: Verifying Query Service...")
         query_data = verify_query_service()
         plan_count = len(query_data.get("data", []))
         logger.info(f"  ✓ Query Service ready: {plan_count} plans visible")
-        
+
         logger.info(f"\n✓ ITERATION {iteration_num} PASSED")
         return True
-        
+
     except Exception as exc:
         logger.error(f"\n✗ ITERATION {iteration_num} FAILED: {exc}")
         import traceback
@@ -185,19 +185,19 @@ def run_iteration(iteration_num: int, delay_minutes: int = 15) -> bool:
 def main():
     """Run the full Phase 11 verification loop."""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="Phase 11 Real-Time Loop Verification")
     parser.add_argument("--iterations", type=int, default=5, help="Number of loop iterations (default 5)")
     parser.add_argument("--delay", type=int, default=15, help="Train delay minutes (default 15)")
     args = parser.parse_args()
-    
+
     logger.info(f"Phase 11: Real-Time Loop Verification")
     logger.info(f"  Command Service: {COMMAND_SERVICE_URL}")
     logger.info(f"  Query Service:   {QUERY_SERVICE_URL}")
     logger.info(f"  Iterations:      {args.iterations}")
     logger.info(f"  Delay minutes:   {args.delay}")
     logger.info("")
-    
+
     # Pre-check: services online
     logger.info("Pre-flight checks...")
     try:
@@ -207,7 +207,7 @@ def main():
     except Exception as exc:
         logger.error(f"  ✗ Command Service offline: {exc}")
         return False
-    
+
     try:
         resp = requests.get(f"{QUERY_SERVICE_URL}/health", timeout=2)
         assert resp.status_code == 200, f"Query Service health check failed: {resp.status_code}"
@@ -215,16 +215,16 @@ def main():
     except Exception as exc:
         logger.error(f"  ✗ Query Service offline: {exc}")
         return False
-    
+
     try:
         verify_plan_in_db()
         logger.info("  ✓ Operational DB accessible")
     except Exception as exc:
         logger.error(f"  ✗ Operational DB not accessible: {exc}")
         return False
-    
+
     logger.info("")
-    
+
     # Run iterations
     passed = 0
     failed = 0
@@ -233,12 +233,12 @@ def main():
             passed += 1
         else:
             failed += 1
-        
+
         # Brief pause between iterations
         if i < args.iterations:
             logger.info(f"Waiting 2s before next iteration...")
             time.sleep(2)
-    
+
     # Summary
     logger.info(f"\n{'='*70}")
     logger.info(f"SUMMARY")
@@ -248,7 +248,7 @@ def main():
     logger.info(f"Failed:           {failed}")
     logger.info(f"Result:           {'✓ ALL PASSED' if failed == 0 else f'✗ {failed} FAILED'}")
     logger.info(f"{'='*70}")
-    
+
     return failed == 0
 
 

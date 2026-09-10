@@ -380,6 +380,43 @@ when a phase's tasks are finished.
 
 > Newest entries at the top. One entry per agent turn that changes the repo.
 
+### 2026-09-10 — Phase 12 Started (Docker Compose Full Stack Orchestration)
+
+- **Phase 12 Status**: ⏳ IN PROGRESS
+- **Objective**: Enable `docker compose up` to run the entire system (all services + infra) locally without manual steps.
+- **Modified Files**:
+  - `infra/docker-compose.yml` — Expanded to include all application services + app-network bridge
+    - Added `command-service` (port 8001, depends on postgres & redpanda, healthcheck on :8001/health)
+    - Added `query-service` (port 8002, depends on postgres & redis, healthcheck on :8002/health)
+    - Added `api-gateway` (port 8000, depends on command-service & query-service, healthcheck on :8000/health)
+    - Added `optimization-service` (no HTTP port, Kafka consumer loop, depends on postgres & redpanda)
+    - Added `frontend` (port 3004 mapped to internal 3000, depends on api-gateway)
+    - Updated comments; service startup order determined by healthcheck dependencies
+- **New Dockerfile Files Created**:
+  - `services/command-service/Dockerfile` — Python 3.12-slim, uvicorn on :8001
+  - `services/query-service/Dockerfile` — Python 3.12-slim, uvicorn on :8002
+  - `services/api-gateway/Dockerfile` — Python 3.12-slim, uvicorn on :8000
+  - `services/optimization-service/Dockerfile` — Python 3.12-slim, Kafka consumer loop
+  - `frontend/Dockerfile` — Multi-stage build: Node 20-alpine (build + runtime)
+- **Architecture**:
+  - All services communicate via `app-network` bridge (docker DNS resolution: service names as hostnames)
+  - Database URLs use `postgres` hostname (not localhost), Kafka brokers as `redpanda:9092`
+  - Frontend NEXT_PUBLIC_API_URL set to `http://localhost:8000` for browser requests
+  - Environment variables per service injected from docker-compose.yml
+- **Usage After Completion**:
+  ```bash
+  docker compose -f infra/docker-compose.yml up -d
+  python infra/bootstrap_topics.py  # Creates Kafka topics once all healthy
+  python _phase11_loop_test.py --iterations 5  # Verify real-time loop
+  ```
+- **Expected Behavior**:
+  - Services start in dependency order (infra → backends → app services)
+  - Healthchecks confirm readiness before dependent services start
+  - Frontend at http://localhost:3004, API Gateway at http://localhost:8000
+  - All logs available via `docker compose logs`
+- **Status**: Docker Compose + Dockerfiles complete. Pending: local testing to verify all services start and healthchecks pass.
+- **Next Action**: Run `docker compose -f infra/docker-compose.yml up -d` to test the full-stack orchestration. Verify logs and healthchecks with `docker compose ps`.
+
 ### 2026-09-10 — Phase 11 Started (Real-Time Loop Wiring & Event Injection)
 
 - **Phase 11 Status**: ⏳ IN PROGRESS
