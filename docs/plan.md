@@ -259,7 +259,7 @@ This is based on patterns proven in [RIVM INFRA](https://gitlab.local.hacon.de/t
 
 _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md](../PHASE_10A_IMPLEMENTATION.md)._
 
-**Status: PHASE 10a.9 COMPLETE** (Backend map endpoints + tile versioning done; 10a.10 integration testing pending)
+**Status: PHASE 10a COMPLETE** (10a.1–10a.10 all done; integration testing verified E2E against live local PostgreSQL, 5 bugs found & fixed)
 
 - ✅ Phase 9C completion verified (all 7 tasks done)
 - ✅ Dependencies installed: maplibre-gl@5.24.0, zustand@4.5.7, dexie@4.4.2
@@ -280,7 +280,7 @@ _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md
 - ✅ Backend: Query Service POST /trainpositions (delta transfer, Redis TTL 10s) + GET /basegraph (Redis TTL 1h)
 - ✅ Backend: API Gateway proxy routes for /basegraph + /trainpositions
 - ✅ Field names aligned to frontend (speed, trackId); time-bucketing made UTC-consistent
-- 🔄 Next: 10a.10 (integration testing — needs live Read Store + Redis)
+- ✅ 10a.10 Integration Testing: E2E verified against live local PostgreSQL (no Redis → cache-off). Found & fixed 5 bugs: duplicate `CREATE TYPE` in Operational migration, multi-bucket tiling (position spans every 15-min bucket), missing CORS on API Gateway, delta-transfer wipe (flat list → tile-grouped + per-tile cache), and a frontend infinite re-render loop (`updateTileVersion` new-Map + merge effect dep on `tiles`). Verified: base graph (6 nodes), trains (3 markers + blocks), time-travel, layer toggles, delta transfer (no wipe), CORS preflight 200.
 
 **10a Frontend Tasks** (8–9 days)
 
@@ -356,11 +356,14 @@ _Estimated 11 days (2 weeks). Detailed breakdown in [PHASE_10A_IMPLEMENTATION.md
 
 **10a Verification & Testing** (0.5 days)
 
-10. **10a.10 Integration Testing**
-    - E2E: Open map → verify base graph renders → verify tiles compute → verify polling loop starts
-    - Time-travel: Adjust slider → verify tiles update → verify train positions change appropriately
-    - Layer toggles: Toggle trains on/off → verify layer visibility toggles
-    - Build verification: `npm run build` passes, no errors
+10. **✓ 10a.10 Integration Testing** — ✅ COMPLETE (verified E2E against live local PostgreSQL, no Redis → cache-off)
+    - [x] E2E: Open map → base graph renders (6 nodes) → tiles compute → polling loop starts → trains render (3 markers + 3 block segments)
+    - [x] Time-travel: slider to +50 min → trains persist (schedules span now-1h..now+3h)
+    - [x] Layer toggles: Trains on/off → `train-cluster`/`train-point` visibility toggles none/visible
+    - [x] Delta transfer: first poll returns 3 positions, unchanged poll returns empty (no wipe)
+    - [x] CORS: preflight `OPTIONS /basegraph` → 200 with `Access-Control-Allow-Origin`
+    - [x] Build verification: `npm run build` passes, 0 errors
+    - **Bugs found & fixed during testing**: (1) duplicate `CREATE TYPE` in Operational migration, (2) multi-bucket tiling, (3) missing CORS on API Gateway, (4) delta-transfer wipe (flat list → tile-grouped + per-tile cache), (5) frontend infinite re-render loop (`updateTileVersion` new-Map + merge effect dep on `tiles`).
 
 **Output:** Functional map with real-time train visualization, time-travel, and tile-based delta transfer.
 

@@ -23,7 +23,7 @@ from app.cache import Cache, cache_get_or_load, cache_key
 from app.db import get_read_store
 from app.schemas import TrainPositionsRequest, TrainPositionsResponse
 from db.readstore.models import DataTile, TrainPosition
-from db.readstore.tiling import position_tile
+from db.readstore.tiling import position_tiles
 
 router = APIRouter(tags=["trainpositions"])
 
@@ -63,29 +63,30 @@ def get_train_positions(
             if tid in latest_versions and client_versions.get(tid) != latest_versions[tid]
         }
 
-        positions: list[dict] = []
+        # Group positions by tile (delta transfer unit). For each CHANGED tile,
+        # include every position that spans it (from_time..to_time). Unchanged
+        # tiles are omitted entirely — the frontend keeps its cached positions
+        # for them. The frontend filters by display time afterwards.
+        tiles_payload: dict[str, list[dict]] = {}
         if changed:
-            # Return every position whose tile (by from_time bucket) is in
-            # `changed`. The frontend filters by its display time, so we return
-            # the full set for the changed tiles and let the client narrow it.
             pos_rows = db.scalars(select(TrainPosition)).all()
             for p in pos_rows:
-                if position_tile(p.x, p.y, p.from_time) in changed:
-                    positions.append(
-                        {
-                            "train_id": p.train_id,
-                            "x": p.x,
-                            "y": p.y,
-                            "track_id": p.track_id,
-                            "track_code": p.track_code,
-                            "speed_kmph": p.speed_kmph,
-                            "from_time": p.from_time,
-                            "to_time": p.to_time,
-                        }
-                    )
+                pos = {
+                    "train_id": p.train_id,
+                    "x": p.x,
+                    "y": p.y,
+                    "track_id": p.track_id,
+                    "track_code": p.track_code,
+                    "speed_kmph": p.speed_kmph,
+                    "from_time": p.from_time,
+                    "to_time": p.to_time,
+                }
+                for tid in position_tiles(p.x, p.y, p.from_time, p.to_time):
+                    if tid in changed:
+                        tiles_payload.setdefault(tid, []).append(pos)
 
         return {
-            "positions": positions,
+            "tiles": tiles_payload,
             "meta": {
                 "data_tile_versions": latest_versions,
                 "business_clock": datetime.now(timezone.utc),

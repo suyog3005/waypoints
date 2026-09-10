@@ -50,7 +50,7 @@ from db.readstore.models import (
     TrainView,
 )
 from db.readstore.session import ReadStoreSession
-from db.readstore.tiling import position_tile
+from db.readstore.tiling import position_tiles
 from db.session import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -298,16 +298,19 @@ def _build_base_graph(db: Session) -> tuple[list[dict], list[dict]]:
 def _build_data_tiles(position_rows: list[dict]) -> dict[str, dict]:
     """Group positions by tile and return ``{tile_id: {train_count}}``.
 
+    A position is counted in **every** 15-minute tile it spans (from
+    ``from_time`` to ``to_time``), because the frontend requests the tile for
+    the current display-time bucket and filters by ``fromTime <= t <= toTime``.
     A tile's version is bumped (in ``sync_read_store``) only when its
     ``train_count`` or position signature changes — see the upsert logic there.
     """
     tiles: dict[str, dict] = {}
     for r in position_rows:
-        # Use the position's from_time bucket as the tile's time dimension.
-        tid = position_tile(r["x"], r["y"], r["from_time"])
-        entry = tiles.setdefault(tid, {"train_count": 0, "_sig": []})
-        entry["train_count"] += 1
-        entry["_sig"].append(f"{r['train_id']}:{r['x']}:{r['y']}")
+        sig_entry = f"{r['train_id']}:{r['x']}:{r['y']}"
+        for tid in position_tiles(r["x"], r["y"], r["from_time"], r["to_time"]):
+            entry = tiles.setdefault(tid, {"train_count": 0, "_sig": []})
+            entry["train_count"] += 1
+            entry["_sig"].append(sig_entry)
     return tiles
 
 

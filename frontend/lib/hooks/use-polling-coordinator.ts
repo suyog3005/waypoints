@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMapStore } from '@/stores/map.store';
 import { useTileStore } from '@/stores/tile.store';
 import { useTimeStore } from '@/stores/time.store';
 import { useTrainPositions } from './use-train-positions';
 import { getVisibleTiles } from '@/lib/tile-management';
 import type { DataTile } from '@/stores/tile.store';
+import type { TrainPosition } from '@/components/map/TrainLayer';
 
 /**
  * usePollingCoordinator – Phase 10a.5
@@ -72,9 +73,34 @@ export function usePollingCoordinator() {
   });
 
   // ── Process response: update version cache + business clock ──────────
-  const processedRef = useRef<string | null>(null);
+  // ── Per-tile position cache (delta transfer) ─────────────────────────
+  // The backend returns positions grouped by tile, and only for tiles whose
+  // version changed. We keep a per-tile cache so unchanged tiles retain their
+  // positions across polls (a flat response would wipe them out).
+  const tilePositionsRef = useRef<Map<string, TrainPosition[]>>(new Map());
+  const [mergedPositions, setMergedPositions] = useState<TrainPosition[]>([]);
+
+  // Keep the latest visible tile IDs in a ref so the merge effect below does
+  // NOT depend on `tiles` (whose identity changes whenever the version cache
+  // updates — depending on it would cause an infinite re-render loop).
+  const visibleIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    visibleIdsRef.current = new Set(tiles.map((t) => t.id));
+  }, [tiles]);
+
   useEffect(() => {
     if (!data) return;
+
+    // Merge the delta: replace cached positions for each changed tile.
+    const cache = tilePositionsRef.current;
+    const visibleIds = visibleIdsRef.current;
+    for (const [tileId, positions] of Object.entries(data.tiles)) {
+      cache.set(tileId, positions);
+    }
+    // Prune tiles that are no longer visible (re-fetched when viewport returns).
+    for (const id of Array.from(cache.keys())) {
+      if (!visibleIds.has(id)) cache.delete(id);
+    }
 
     // Update tile version cache from response meta
     const versions = data.meta?.dataTileVersions;
@@ -89,13 +115,15 @@ export function usePollingCoordinator() {
       setBusinessClock(new Date(data.meta.businessClock));
     }
 
-    // Track processed data to avoid re-processing on re-render
-    processedRef.current = JSON.stringify(data.meta?.dataTileVersions ?? {});
+    // Flatten the per-tile cache into the position list the map renders.
+    const merged: TrainPosition[] = [];
+    for (const positions of cache.values()) merged.push(...positions);
+    setMergedPositions(merged);
   }, [data, updateTileVersion, setBusinessClock]);
 
   return {
-    /** Filtered train positions for the current display time. */
-    positions: data?.positions ?? [],
+    /** Merged train positions (all visible tiles) for the current display time. */
+    positions: mergedPositions,
     /** Whether the polling query is in flight. */
     isLoading,
     /** Error from the last failed fetch (if any). */

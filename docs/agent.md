@@ -286,7 +286,7 @@ Root: .gitignore, .editorconfig, pyproject.toml (shared ruff/black config)
   fixed: added `--registry=https://registry.npmjs.org` to bypass slow/blocked Siemens
   Artifactory (configured in user `.npmrc`). Phases 9B (Core Read + Write Features)
   and 9C (Visualization & Polish) DONE.
-- **Phase 10a (Map-based Railway Visualization): 10a.1–10a.9 DONE; 10a.10 pending.**
+- **Phase 10a (Map-based Railway Visualization): 10a.1–10a.10 ALL DONE.**
   Frontend (10a.1–10a.7): Maplibre GL JS 5.24.0 map at `/infrastructure/map` with
   3 Zustand stores (map/tile/time, `subscribeWithSelector` + `persist`), core
   components (MapContainer, TrainLayer, BlockLayer, TimeControls, MapSidebar), API
@@ -300,7 +300,20 @@ Root: .gitignore, .editorconfig, pyproject.toml (shared ruff/black config)
   Query Service `POST /trainpositions` (delta transfer, Redis TTL 10 s) +
   `GET /basegraph` (Redis TTL 1 h); API Gateway proxy routes for both. Field names
   aligned to frontend (`speed`, `trackId`) and time-bucketing made UTC-consistent.
-  **10a.10 (Integration Testing) pending** — needs live Read Store + Redis.
+  **10a.10 (Integration Testing) DONE** — verified E2E against a live local
+  PostgreSQL (Operational `waypoints` + Read Store `waypoints_read`, no Redis →
+  cache-off). Found & fixed 4 real bugs: (1) duplicate `CREATE TYPE` in the
+  Operational migration (manual enum loop + `op.create_table` auto-emit), (2)
+  multi-bucket tiling (a position must live in every 15-min bucket it spans, not
+  just its `from_time` bucket), (3) missing CORS on the API Gateway (preflight
+  405), (4) delta-transfer wipe (flat `positions` list → changed to tile-grouped
+  `tiles` + frontend per-tile cache merge). Also fixed a 5th, frontend-only bug
+  surfaced during testing: an infinite re-render loop ("Maximum update depth
+  exceeded") caused by `updateTileVersion` creating a new Map every poll + the
+  merge effect depending on `tiles`. Verified: base graph renders (6 nodes),
+  trains render (3 markers + block segments), time-travel slider works, layer
+  toggles work, delta transfer (first poll 3 positions / unchanged poll empty, no
+  wipe), CORS preflight 200.
 
 Always check this section before assuming a phase is complete — update it immediately
 when a phase's tasks are finished.
@@ -367,6 +380,19 @@ when a phase's tasks are finished.
 
 > Newest entries at the top. One entry per agent turn that changes the repo.
 
+### 2026-09-10 — Phase 10a.10 Complete (Integration Testing — 5 bugs found & fixed)
+
+- **Phase 10a.10 Status**: ✅ COMPLETE — full E2E verified against live local PostgreSQL (Operational `waypoints` + Read Store `waypoints_read`; no Redis → Query Service runs cache-off).
+- **Environment**: Local PostgreSQL 18 (Docker/Rancher daemon would not start). Credentials `postgres` / `ColdVagabond@30` (URL-encode `@` as `%40`; in the Alembic env var use `%%40` to survive configparser interpolation). Python via `uv` (Siemens Artifactory unreachable → `uv run --default-index https://pypi.org/simple`). Services import the shared `db` package from repo root → set `PYTHONPATH=<repo root>`.
+- **Bug 1 — duplicate `CREATE TYPE` (Operational migration)**: `db/migrations/versions/0001_initial_schema.py` manually looped `enum_type.create(bind, checkfirst=True)` AND `op.create_table` auto-emits `CREATE TYPE` for named-enum columns → `DuplicateObject` on a fresh DB. Removed the manual loop. Verified: generated SQL now has 7 unique `CREATE TYPE` (was 14).
+- **Bug 2 — multi-bucket tiling**: a position was stored only in its `from_time` bucket tile, but the frontend requests the *current display-time* bucket, so a train active 19:06–23:06 UTC was invisible at 20:00. Added `position_tiles(x, y, from_time, to_time) -> list[str]` (every 15-min bucket in the span) to `db/readstore/tiling.py`; ETL `_build_data_tiles` now counts each position in every spanned tile; Query Service `train_positions.py` groups positions by every spanned tile.
+- **Bug 3 — missing CORS on API Gateway**: frontend (localhost:3003) fetches cross-origin from localhost:8000; preflight `OPTIONS /basegraph` returned 405. Added `cors_origins` (localhost/127.0.0.1 :3000–3003) to `services/api-gateway/app/config.py` and `CORSMiddleware` (added LAST = outermost, so it answers preflight before auth) in `app/main.py`. Verified: preflight 200 with `Access-Control-Allow-Origin: http://localhost:3003`.
+- **Bug 4 — delta-transfer wipe (trains disappeared)**: response was a flat `positions` list; an unchanged-tile poll returned 0 positions and the frontend replaced state with empty → trains vanished. Changed `TrainPositionsResponse` to `tiles: dict[str, list[TrainPositionOut]]` (grouped by tile, the delta unit) in `services/query-service/app/schemas.py` + router; frontend `use-train-positions.ts` type updated; `use-polling-coordinator.ts` now keeps a per-tile cache (`tilePositionsRef`) and merges deltas (replace per-tile, prune non-visible, flatten). Verified: first poll `{'0_0_...': 3}`, unchanged poll `{}` (no wipe).
+- **Bug 5 — infinite re-render loop (frontend, surfaced during testing)**: "Maximum update depth exceeded" in `tile.store.ts`. `updateTileVersion` created a new Map every poll → `tileVersionCache` ref changed → `tiles` useMemo recomputed → merge effect (dep `tiles`) re-ran → `updateTileVersion` again → loop. Fixed two ways: (a) `updateTileVersion` is now a no-op when the version is unchanged (`frontend/stores/tile.store.ts`); (b) the merge effect no longer depends on `tiles` — visible IDs are read from a ref (`visibleIdsRef`) so the effect only runs when `data` changes (`frontend/lib/hooks/use-polling-coordinator.ts`).
+- **Seed** (`db/seed.py`): added a 3rd track (TRK-C "Goods Loop"), a 2nd train (56789 PASSENGER), and 3 `TrainSchedule` entries spanning current time so the map has live data on a fresh seed.
+- **Cleanup**: removed the TEMP `window.__map` debug line from `MapContainer.tsx`; deleted temp scripts `_check_db.py`, `_delta_test.py`, `_refresh_schedules.py`; added `uv.lock` to `.gitignore`.
+- **Verified in browser (Playwright)**: base graph renders (6 nodes), trains render (3 markers + 3 block segments), time-travel slider (trains persist at +50 min), layer toggles (Trains → visibility none/visible), delta transfer (no wipe), CORS preflight 200. The only remaining console noise is Next.js 14 dev-mode RSC manifest warnings (known dev-server quirk, non-functional).
+
 ### 2026-09-09 — Phase 10a.8 + 10a.9 Complete (Backend Map Endpoints + Tile Versioning)
 
 - **Phase 10a.8 Status**: ✅ COMPLETE — `POST /trainpositions` + `GET /basegraph` in Query Service
@@ -375,7 +401,7 @@ when a phase's tasks are finished.
   - **Shared tiling module** (`db/readstore/tiling.py`, NEW): dependency-light `TILE_SIZE_M` (10 000), `TIME_BUCKET_MINUTES` (15), `time_bucket()`, `tile_id()`, `position_tile()`. Used by BOTH the ETL (write) and Query Service (read) so tile IDs are identical.
   - **ETL** (`db/readstore/etl.py`): `_track_geometry()` (schematic grid: each track horizontal, 10 km, 2.5 km row spacing), `_build_train_positions()` (train at track midpoint per schedule window), `_build_base_graph()` (each track = edge between `{code}-A`/`{code}-B` nodes), `_build_data_tiles()`, `_sync_data_tiles()` (bumps version UUID only when train_count or signature changes; deletes stale tiles). `sync_read_store()` now writes all new projections.
   - **Migration** (`db/readstore/migrations/versions/0002_map_projections.py`, NEW): hand-authored tables for the 4 new projections (no live Postgres to autogenerate).
-  - **Schemas** (`services/query-service/app/schemas.py`): `_CamelModel` base (to_camel alias generator, populate_by_name, from_attributes). `TrainPositionOut` (speed serialized as `speed` via validation_alias `speed_kmph`), `DataTileIn`, `TrainPositionsRequest`, `TrainPositionsMeta`, `TrainPositionsResponse`, `BaseGraphNodeOut`, `BaseGraphEdgeOut` (`from_` → wire `from`, `track_id` → `trackId`), `BaseGraphOut`.
+  - **Schemas** (`services/query-service/app/schemas.py`): `_CamelModel` base (to*camel alias generator, populate_by_name, from_attributes). `TrainPositionOut` (speed serialized as `speed` via validation_alias `speed_kmph`), `DataTileIn`, `TrainPositionsRequest`, `TrainPositionsMeta`, `TrainPositionsResponse`, `BaseGraphNodeOut`, `BaseGraphEdgeOut` (`from*`→ wire`from`, `track_id`→`trackId`), `BaseGraphOut`.
   - **Routers** (Query Service): `routers/train_positions.py` (POST /trainpositions — delta transfer: returns positions only for changed tiles + all latest versions; Redis TTL 10 s), `routers/basegraph.py` (GET /basegraph — Redis TTL 1 h). Both registered in `app/main.py`.
   - **API Gateway** (`services/api-gateway/app/routers/reads.py`): added `GET /basegraph` + `POST /trainpositions` proxy routes (forward() passes POST body via `content=body`).
   - **CRITICAL FIX — field-name alignment**: frontend `TrainPosition.speed` ↔ backend `speed_kmph` (now serialized as `speed`); frontend `BaseGraphEdge.trackId` ↔ backend `track_id` (now serialized as `trackId`). Verified via `model_dump(by_alias=True)`.

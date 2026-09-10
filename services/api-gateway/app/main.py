@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.middleware import CorrelationIdMiddleware, StubAuthMiddleware
@@ -37,10 +38,19 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="API Gateway", lifespan=lifespan)
 
 # Middleware order: add_middleware inserts at the front, so the LAST one added is
-# outermost (runs first). We want correlation-ID outermost so even auth 401
-# responses carry the header.
+# outermost (runs first). CORS is added last so it is outermost — it must answer
+# preflight (OPTIONS) requests before the auth stub can reject them. Correlation-ID
+# is next so even auth 401 responses carry the header.
 app.add_middleware(StubAuthMiddleware, enabled=settings.auth_enabled)
 app.add_middleware(CorrelationIdMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-Correlation-Id"],
+)
 
 app.include_router(reads.router)
 app.include_router(writes.router)

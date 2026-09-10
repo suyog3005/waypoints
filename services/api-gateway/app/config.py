@@ -20,6 +20,19 @@ class Settings(BaseSettings):
     auth_enabled: bool = False
     # Outbound request timeout to backend services (seconds).
     upstream_timeout_seconds: float = 10.0
+    # Origins allowed to call the gateway cross-origin (the frontend dev server).
+    # The browser blocks the response without CORS headers, so the map page
+    # (localhost:3000-3003) cannot read /basegraph or /trainpositions otherwise.
+    cors_origins: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:3002",
+        "http://localhost:3003",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:3002",
+        "http://127.0.0.1:3003",
+    ]
 
 
 settings = Settings()

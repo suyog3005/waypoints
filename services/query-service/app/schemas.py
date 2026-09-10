@@ -110,7 +110,13 @@ class TrainPositionsMeta(_CamelModel):
 
 
 class TrainPositionsResponse(_CamelModel):
-    positions: list[TrainPositionOut]
+    # Positions grouped by tile ID. This is the unit of delta transfer: the
+    # server only includes tiles whose version changed, each with its FULL
+    # position list. The frontend keeps a per-tile cache and merges these
+    # deltas (replacing a tile's positions when it changes, keeping them when
+    # unchanged) — a flat list would let an unchanged-tile delta wipe out
+    # trains the client already has.
+    tiles: dict[str, list[TrainPositionOut]]
     meta: TrainPositionsMeta
 
 

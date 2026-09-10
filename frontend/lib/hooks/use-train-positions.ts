@@ -8,7 +8,13 @@ import type { TrainPosition } from '@/components/map/TrainLayer';
 // ── Response types ─────────────────────────────────────────────────────
 
 export interface TrainPositionsResponse {
-  positions: TrainPosition[];
+  /**
+   * Positions grouped by tile ID — the unit of delta transfer. Only tiles whose
+   * version changed are present, each with its FULL position list. The consumer
+   * (usePollingCoordinator) merges these into a per-tile cache so unchanged
+   * tiles keep their positions across polls.
+   */
+  tiles: Record<string, TrainPosition[]>;
   meta: {
     dataTileVersions: Record<string, string>; // tileId -> new UUID version
     businessClock: string; // ISO 8601

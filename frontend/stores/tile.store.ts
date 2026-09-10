@@ -55,6 +55,10 @@ export const useTileStore = create<TileStore>()(
     tileVersionCache: new Map(),
     updateTileVersion: (tileId, version) =>
       set((state) => {
+        // No-op when the version is unchanged: avoids creating a new Map (and
+        // thus a new reference) on every poll, which would otherwise trigger an
+        // infinite re-render loop in the polling coordinator.
+        if (state.tileVersionCache.get(tileId) === version) return {};
         const newCache = new Map(state.tileVersionCache);
         newCache.set(tileId, version);
         return { tileVersionCache: newCache };

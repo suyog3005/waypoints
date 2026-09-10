@@ -805,7 +805,7 @@ The architecture should remain understandable to developers and operators withou
 506. There is no centralized system of record correlating: the original request, the
      approved plan, the actual execution outcome, and the resulting traffic impact —
      making it hard to learn from history or defend planning decisions after the fact.
-507. The goal of this system is to digitize the full lifecycle of a block — request,
+507. The goal of this system is to digitise the full lifecycle of a block — request,
      validation, conflict/dependency detection, AI-assisted optimization, approval,
      execution, and post-block reporting — while preserving human authority over
      safety-critical approval decisions.

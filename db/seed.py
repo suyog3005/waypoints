@@ -19,6 +19,7 @@ from db.models import (
     Section,
     Track,
     Train,
+    TrainSchedule,
     User,
     Zone,
 )
@@ -57,14 +58,49 @@ def seed() -> None:
 
         track_a = Track(section_id=section.id, code="TRK-A", name="Up Main Line", direction="UP")
         track_b = Track(section_id=section.id, code="TRK-B", name="Down Main Line", direction="DOWN")
-        session.add_all([track_a, track_b])
+        track_c = Track(section_id=section.id, code="TRK-C", name="Goods Loop", direction="UP")
+        session.add_all([track_a, track_b, track_c])
         session.flush()
 
         train = Train(train_number="12345", train_type="EXPRESS")
-        session.add(train)
+        train_2 = Train(train_number="56789", train_type="PASSENGER")
+        session.add_all([train, train_2])
         session.flush()
 
         now = datetime.now(timezone.utc)
+
+        # Schedules spanning the current time so the map shows trains
+        # immediately (the ETL places each train at its track midpoint for the
+        # duration of the schedule window).
+        session.add_all(
+            [
+                TrainSchedule(
+                    train_id=train.id,
+                    track_id=track_a.id,
+                    scheduled_start=now - timedelta(hours=1),
+                    scheduled_end=now + timedelta(hours=3),
+                    created_at=now,
+                    updated_at=now,
+                ),
+                TrainSchedule(
+                    train_id=train_2.id,
+                    track_id=track_b.id,
+                    scheduled_start=now - timedelta(minutes=30),
+                    scheduled_end=now + timedelta(hours=2),
+                    created_at=now,
+                    updated_at=now,
+                ),
+                TrainSchedule(
+                    train_id=train_2.id,
+                    track_id=track_c.id,
+                    scheduled_start=now + timedelta(hours=4),
+                    scheduled_end=now + timedelta(hours=6),
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ]
+        )
+
         from db.models import BlockRequest
 
         sample_request = BlockRequest(

@@ -43,17 +43,12 @@ def upgrade() -> None:
     constraint_severity = postgresql.ENUM("hard", "soft", name="constraint_severity")
     event_source = postgresql.ENUM("internal", "external", name="event_source")
 
-    bind = op.get_bind()
-    for enum_type in (
-        request_status,
-        request_priority,
-        plan_status,
-        request_type,
-        optimization_run_status,
-        constraint_severity,
-        event_source,
-    ):
-        enum_type.create(bind, checkfirst=True)
+    # NOTE: The named ENUM types above are created automatically by the
+    # ``op.create_table`` calls below (SQLAlchemy emits ``CREATE TYPE`` for each
+    # named-enum column). Do NOT also call ``enum_type.create()`` here — doing
+    # so emits a second ``CREATE TYPE`` and fails with
+    # ``DuplicateObject: type ... already exists`` (caught on first live run,
+    # 2026-09-10).
 
     # --- Organizational hierarchy ---------------------------------------
     op.create_table(
