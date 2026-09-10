@@ -21,11 +21,17 @@ export interface BaseGraphNode {
   name?: string;
 }
 
+export interface BaseGraphWaypoint {
+  x: number;
+  y: number;
+}
+
 export interface BaseGraphEdge {
   id: string;
   from: string;
   to: string;
   trackId?: string;
+  waypoints?: BaseGraphWaypoint[];
 }
 
 export interface BaseGraphData {
@@ -56,7 +62,17 @@ const MOCK_BASE_GRAPH: BaseGraphData = {
     { id: 'e-1', from: 'st-a', to: 'jn-1', trackId: 'T1' },
     { id: 'e-2', from: 'jn-1', to: 'st-b', trackId: 'T1' },
     { id: 'e-3', from: 'st-b', to: 'st-c', trackId: 'T2' },
-    { id: 'e-4', from: 'st-c', to: 'jn-2', trackId: 'T3' },
+    // Edge with curved waypoints for visual demo
+    {
+      id: 'e-4',
+      from: 'st-c',
+      to: 'jn-2',
+      trackId: 'T3',
+      waypoints: [
+        { x: 22_000, y: 1_200 },  // Slight upward curve
+        { x: 24_000, y: 1_800 },  // Gradual bend
+      ],
+    },
     { id: 'e-5', from: 'jn-2', to: 'st-d', trackId: 'T3' },
     { id: 'e-6', from: 'st-d', to: 'st-e', trackId: 'T4' },
   ],
@@ -286,15 +302,27 @@ function edgeFeatures(nodes: BaseGraphNode[], edges: BaseGraphEdge[]) {
     .map((e) => {
       const a = byId.get(e.from)!;
       const b = byId.get(e.to)!;
+      
+      // Build coordinate array: start node + waypoints (if any) + end node.
+      // This supports both straight edges (no waypoints) and curved edges (with waypoints).
+      const coordinates: Array<[number, number]> = [
+        [toLon(a.x), toLat(a.y)],
+      ];
+      
+      if (e.waypoints && e.waypoints.length > 0) {
+        for (const wp of e.waypoints) {
+          coordinates.push([toLon(wp.x), toLat(wp.y)]);
+        }
+      }
+      
+      coordinates.push([toLon(b.x), toLat(b.y)]);
+      
       return {
         type: 'Feature' as const,
         properties: { id: e.id, trackId: e.trackId ?? '' },
         geometry: {
           type: 'LineString' as const,
-          coordinates: [
-            [toLon(a.x), toLat(a.y)],
-            [toLon(b.x), toLat(b.y)],
-          ],
+          coordinates,
         },
       };
     });
@@ -314,7 +342,14 @@ function addBaseGraph(map: maplibregl.Map, data: BaseGraphData) {
     id: 'base-edges',
     type: 'line',
     source: 'base-edges',
-    paint: { 'line-color': '#94a3b8', 'line-width': 2 },
+    layout: {
+      'line-join': 'round',
+      'line-cap': 'round',
+    },
+    paint: {
+      'line-color': '#94a3b8',
+      'line-width': 2,
+    },
   });
   map.addLayer({
     id: 'base-nodes',
