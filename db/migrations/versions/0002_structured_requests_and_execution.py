@@ -27,9 +27,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # --- New ENUM types ---------------------------------------------------
-    # Named ENUMs are created automatically by the column definitions below
-    # (SQLAlchemy emits CREATE TYPE for each named-enum column). Do NOT also
-    # call enum_type.create() — that emits a duplicate CREATE TYPE.
+    # Named ENUMs are auto-created by SQLAlchemy only when a column carrying
+    # them is part of a CREATE TABLE (see block_execution_states below,
+    # which auto-creates execution_state/power_block_state). The four types
+    # below are only ever used via ADD COLUMN on the existing block_requests
+    # table, which does NOT auto-create the type, so those four must be
+    # created explicitly first (checkfirst=True keeps this idempotent).
+    bind = op.get_bind()
+
     block_class = postgresql.ENUM(
         "routine", "corridor", "mega", "major_works", "project",
         "third_party", "short_micro", "emergency", "restoration", "security",
@@ -56,6 +61,9 @@ def upgrade() -> None:
         "not_requested", "requested", "granted", "earthed", "earth_removed",
         name="power_block_state",
     )
+
+    for enum_type in (block_class, origin_type, criticality, adjacent_line_status):
+        enum_type.create(bind, checkfirst=True)
 
     # --- Structured demand fields on block_requests (OPUS-5 Part G) -------
     op.add_column(
