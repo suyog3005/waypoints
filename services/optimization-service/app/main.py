@@ -1,9 +1,10 @@
 """Optimization service entrypoint.
 
 This service is a Kafka consumer worker (not an HTTP API). It subscribes to
-optimization request topics, runs the planner (Shadow Finder + interval-union
-merge), and publishes results (see docs/application_architecture_flow.md,
-Sections 16-20).
+optimization request topics, runs the planner (the vendored CP-SAT pipeline:
+LightGBM priority classifier -> solver -> feasibility validator), and
+publishes results (see docs/application_architecture_flow.md, Sections
+16-20).
 
 Run with:
     python -m app.main

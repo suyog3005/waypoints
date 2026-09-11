@@ -1,35 +1,50 @@
-"""Planner: orchestrates Shadow Finder + optimizer and persists the result.
+"""Planner: orchestrates the CP-SAT pipeline and persists the result.
 
-Loads eligible block requests, runs the pure merge logic, and writes a Plan,
-its Blocks, and PlanItems (traceability back to source requests) to the
-Operational DB. Also computes the metrics exposed on the optimization result
-(architecture Section 20).
+Loads eligible block requests for a section, runs the vendored pipeline
+(services/optimization-service/pipeline/) end to end -- LightGBM priority
+classifier -> CP-SAT solver -> independent feasibility validator -- and
+writes a Plan/Blocks/PlanItems/OptimizationResult via app/adapter.py. A
+schedule that fails validation is never persisted; the run is marked FAILED
+with the violations recorded instead.
+
+The old placeholder (app/optimizer.py's merge_windows, app/shadow_finder.py)
+is no longer wired in here but stays in the tree unused.
 """
 
 from __future__ import annotations
 
+import logging
+import sys
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app import adapter
+from app.config import settings
 from app.db import SessionLocal
-from app.optimizer import MergedBlock, merge_windows
-from app.shadow_finder import RequestWindow
-from db.models import (
-    Block,
-    BlockAffectedTrack,
-    BlockRequest,
-    BlockRequestAffectedTrack,
-    OptimizationResult,
-    OptimizationRun,
-    Plan,
-    PlanItem,
-    Track,
-)
-from db.models.enums import OptimizationRunStatus, PlanStatus, RequestStatus
+from db.models import OptimizationRun, Track
+from db.models.enums import OptimizationRunStatus
+
+# Same vendored-pipeline bootstrapping as app/adapter.py: pipeline/src is a
+# symlink to pipeline/ itself, so `from src.config import ...` (the vendored
+# files' own internal imports) resolves once pipeline/ is on sys.path.
+_PIPELINE_DIR = Path(__file__).resolve().parent.parent / "pipeline"
+if str(_PIPELINE_DIR) not in sys.path:
+    sys.path.insert(0, str(_PIPELINE_DIR))
+
+import check as pipeline_check  # noqa: E402
+import model as pipeline_model  # noqa: E402
+from solver import schedule_solver  # noqa: E402
+
+# model.py's MODEL_PATH ("models/priority_classifier.joblib") is relative to
+# block-planner's own repo root, not this service's cwd. Patch the module
+# attribute at runtime rather than editing the vendored file.
+pipeline_model.MODEL_PATH = str(_PIPELINE_DIR / "models" / "priority_classifier.joblib")
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -49,29 +64,33 @@ class OptimizationOutcome:
     metrics: PlanMetrics | None
 
 
-def _load_eligible_requests(db: Session, track_id: uuid.UUID | None) -> list[BlockRequest]:
-    """Requests that need planning: submitted (not yet scheduled/merged)."""
-    stmt = select(BlockRequest).where(BlockRequest.status == RequestStatus.SUBMITTED)
-    if track_id is not None:
-        stmt = stmt.where(BlockRequest.track_id == track_id)
-    return list(db.scalars(stmt).all())
-
-
 def _section_for_track(db: Session, track: Track) -> uuid.UUID:
     return track.section_id
 
 
-def _compute_metrics(blocks: list[MergedBlock], request_count: int) -> PlanMetrics:
-    total_minutes = sum(b.duration_minutes for b in blocks)
-    affected_tracks = {b.track_id for b in blocks}
-    merged_requests = sum(len(b.request_ids) for b in blocks if b.is_merged)
+def _compute_metrics(possessions_df, schedule_df, merged_requests_count: int) -> PlanMetrics:
+    total_block_duration_minutes = int((possessions_df["end_min"] - possessions_df["start_min"]).sum())
+    affected_tracks = {
+        (segment, poss.line)
+        for poss in possessions_df.itertuples()
+        for segment in range(poss.segment_start, poss.segment_end + 1)
+    }
     return PlanMetrics(
-        total_block_duration_minutes=total_minutes,
+        total_block_duration_minutes=total_block_duration_minutes,
         affected_tracks_count=len(affected_tracks),
-        merged_requests_count=merged_requests,
-        block_count=len(blocks),
-        request_count=request_count,
+        merged_requests_count=merged_requests_count,
+        block_count=len(possessions_df),
+        request_count=len(schedule_df),
     )
+
+
+def _summarize_violations(violations: list) -> str:
+    by_rule: dict[str, int] = {}
+    for v in violations:
+        by_rule[v.rule] = by_rule.get(v.rule, 0) + 1
+    counts = ", ".join(f"{rule}={count}" for rule, count in sorted(by_rule.items()))
+    examples = "; ".join(f"[{v.rule}] {v.job_id or v.possession_id}: {v.detail}" for v in violations[:5])
+    return f"check.validate found {len(violations)} violation(s) ({counts}). Examples: {examples}"
 
 
 def run_optimization(
@@ -81,8 +100,9 @@ def run_optimization(
     triggered_by_event_id: uuid.UUID | None = None,
     correlation_id: uuid.UUID | None = None,
 ) -> OptimizationOutcome:
-    """Run one optimization cycle. Returns an OptimizationOutcome; plan_id is
-    None when there were no eligible requests (nothing to plan).
+    """Run one optimization cycle for a section. Returns an
+    OptimizationOutcome; plan_id is None when there were no eligible
+    requests, or when the solved schedule failed validation.
     """
     with SessionLocal() as db:
         run = OptimizationRun(
@@ -94,92 +114,53 @@ def run_optimization(
         db.flush()
 
         try:
-            requests = _load_eligible_requests(db, track_id)
-            if not requests:
+            resolved_section_id = section_id
+            if resolved_section_id is None:
+                if track_id is None:
+                    raise ValueError("run_optimization requires track_id or section_id")
+                track = db.get(Track, track_id)
+                if track is None:
+                    raise ValueError(f"track {track_id} not found")
+                resolved_section_id = _section_for_track(db, track)
+
+            jobs_df, trains_df, windows_df, segments_df = adapter.build_pipeline_inputs(db, resolved_section_id)
+            if jobs_df.empty:
                 run.status = OptimizationRunStatus.SUCCEEDED
                 run.completed_at = datetime.now(timezone.utc)
                 db.commit()
                 return OptimizationOutcome(plan_id=None, metrics=None)
 
-            # Build windows (primary track only for the MVP merge; affected
-            # tracks are recorded on the block for dependency visibility).
-            windows = [
-                RequestWindow(
-                    request_id=r.id,
-                    track_id=r.track_id,
-                    start=r.requested_start,
-                    end=r.requested_end,
-                )
-                for r in requests
-            ]
-
-            # Group by track and merge each track's windows independently.
-            by_track: dict[uuid.UUID, list[RequestWindow]] = {}
-            for w in windows:
-                by_track.setdefault(w.track_id, []).append(w)
-            merged_blocks: list[MergedBlock] = []
-            for tw in by_track.values():
-                merged_blocks.extend(merge_windows(tw))
-
-            # Determine the plan's section (from the first block's track).
-            first_track = db.get(Track, merged_blocks[0].track_id)
-            if first_track is None:
-                raise ValueError(f"track {merged_blocks[0].track_id} not found")
-            plan_section = section_id or _section_for_track(db, first_track)
-
-            plan = Plan(
-                section_id=plan_section,
-                status=PlanStatus.PROPOSED,
-                optimization_run_id=run.id,
+            weights = pipeline_model.predicted_weights(jobs_df)
+            schedule_df, possessions_df, metrics, solve_info = schedule_solver(
+                jobs_df, trains_df, windows_df, weights, time_limit=settings.solve_time_limit
             )
-            db.add(plan)
-            db.flush()
-
-            for mb in merged_blocks:
-                block = Block(
-                    plan_id=plan.id,
-                    track_id=mb.track_id,
-                    start_time=mb.start,
-                    end_time=mb.end,
-                    is_merged=mb.is_merged,
-                )
-                db.add(block)
-                db.flush()
-                for req_id in mb.request_ids:
-                    db.add(PlanItem(plan_id=plan.id, block_id=block.id, block_request_id=req_id))
-                # Record affected tracks declared by the contributing requests.
-                for req_id in mb.request_ids:
-                    affected = db.scalars(
-                        select(BlockRequestAffectedTrack.track_id).where(
-                            BlockRequestAffectedTrack.block_request_id == req_id
-                        )
-                    ).all()
-                    for at in affected:
-                        if at != mb.track_id:
-                            db.add(BlockAffectedTrack(block_id=block.id, track_id=at))
-
-            # Mark the source requests as scheduled (they are now in a plan).
-            for r in requests:
-                r.status = RequestStatus.SCHEDULED
-
-            metrics = _compute_metrics(merged_blocks, len(requests))
-            result = OptimizationResult(
-                optimization_run_id=run.id,
-                plan_id=plan.id,
-                total_block_duration_minutes=metrics.total_block_duration_minutes,
-                affected_tracks_count=metrics.affected_tracks_count,
-                merged_requests_count=metrics.merged_requests_count,
-                metrics={
-                    "block_count": metrics.block_count,
-                    "request_count": metrics.request_count,
-                },
+            logger.info(
+                "run %s: solver status=%s wall_clock=%ss objective=%s bound=%s",
+                run.id,
+                solve_info["status"],
+                solve_info["wall_clock_seconds"],
+                solve_info["objective_value"],
+                solve_info["best_objective_bound"],
             )
-            db.add(result)
+
+            violations = pipeline_check.validate(
+                schedule_df, possessions_df, segments_df, trains_df, windows_df, jobs_df
+            )
+            if violations:
+                run.status = OptimizationRunStatus.FAILED
+                run.completed_at = datetime.now(timezone.utc)
+                run.error_message = _summarize_violations(violations)
+                db.commit()
+                return OptimizationOutcome(plan_id=None, metrics=None)
+
+            plan, merged_requests_count = adapter.persist_solver_output(db, run, schedule_df, possessions_df, metrics)
 
             run.status = OptimizationRunStatus.SUCCEEDED
             run.completed_at = datetime.now(timezone.utc)
             db.commit()
-            return OptimizationOutcome(plan_id=plan.id, metrics=metrics)
+
+            plan_metrics = _compute_metrics(possessions_df, schedule_df, merged_requests_count)
+            return OptimizationOutcome(plan_id=plan.id, metrics=plan_metrics)
 
         except Exception:
             db.rollback()
