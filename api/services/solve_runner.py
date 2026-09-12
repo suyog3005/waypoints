@@ -18,10 +18,14 @@ from api.services.persistence import get_scenario, save_result, update_run_statu
 PRIORITY_ORDER = ["Critical", "High", "Medium", "Low"]
 
 
-def _weighted_wait(mean_wait_days: dict) -> float:
+def _weighted_wait(mean_wait_days: dict) -> float | None:
     """Single fairness score: PRIORITY_WEIGHTS applied to each priority
     class's mean wait, comparable across approaches regardless of which
-    weight scheme produced the schedule."""
+    weight scheme produced the schedule. None (not a partial sum) if any
+    class has no placed jobs to average -- a class silently dropped from
+    the sum would understate the score rather than flag missing data."""
+    if any(mean_wait_days[cls] is None for cls in PRIORITY_ORDER):
+        return None
     return sum(PRIORITY_WEIGHTS[cls] * mean_wait_days[cls] for cls in PRIORITY_ORDER)
 
 

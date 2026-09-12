@@ -173,6 +173,11 @@ def _compute_metrics(
     order = ["Critical", "High", "Medium", "Low"]
     mean_delay_days = (delay_days.groupby(placed["priority_class"]).mean().reindex(order).round(2)).to_dict()
     mean_wait_days = (wait_days.groupby(placed["priority_class"]).mean().reindex(order).round(2)).to_dict()
+    # reindex(order) introduces NaN for any class with zero placed jobs --
+    # Postgres jsonb rejects NaN outright (it's not valid JSON), so swap to
+    # None ("no data for this class") before it ever reaches persistence.
+    mean_delay_days = {k: (None if pd.isna(v) else v) for k, v in mean_delay_days.items()}
+    mean_wait_days = {k: (None if pd.isna(v) else v) for k, v in mean_wait_days.items()}
 
     return {
         "line_blocked_min": _line_blocked_min(possessions_df),

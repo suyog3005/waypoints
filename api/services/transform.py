@@ -57,11 +57,13 @@ def build_schedule_response(schedule_json: list, possessions_json: list, unsched
 
 def _pct_diff(value, baseline_value):
     """% change of `value` vs `baseline_value`; recurses into dict-shaped
-    metrics (e.g. wait_days by priority_class). None where baseline is 0/NaN
-    -- a % change against nothing is undefined, not zero."""
+    metrics (e.g. wait_days by priority_class). None where either side is
+    missing (a class with zero placed jobs stores None, not NaN -- Postgres
+    jsonb rejects NaN outright) or baseline is 0 -- a % change against
+    nothing, or from nothing, is undefined, not zero."""
     if isinstance(value, dict):
         return {k: _pct_diff(value[k], baseline_value[k]) for k in value}
-    if not baseline_value or baseline_value != baseline_value:
+    if value is None or not baseline_value:
         return None
     return round((value - baseline_value) / baseline_value * 100, 2)
 

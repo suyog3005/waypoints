@@ -309,8 +309,9 @@ def schedule_solver(
             "total_job_duration_min": 0.0,
             "jobs_unscheduled": len(jobs),
             "n_possessions": 0,
-            "mean_delay_days": {k: float("nan") for k in ("Critical", "High", "Medium", "Low")},
-            "mean_wait_days": {k: float("nan") for k in ("Critical", "High", "Medium", "Low")},
+            # None, not NaN -- Postgres jsonb rejects NaN outright (not valid JSON).
+            "mean_delay_days": {k: None for k in ("Critical", "High", "Medium", "Low")},
+            "mean_wait_days": {k: None for k in ("Critical", "High", "Medium", "Low")},
         }
         return empty_schedule, empty_possessions, metrics, solve_info
 
@@ -362,6 +363,11 @@ def schedule_solver(
     order = ["Critical", "High", "Medium", "Low"]
     mean_delay_days = (delay_days.groupby(placed["priority_class"]).mean().reindex(order).round(2)).to_dict()
     mean_wait_days = (wait_days.groupby(placed["priority_class"]).mean().reindex(order).round(2)).to_dict()
+    # reindex(order) introduces NaN for any class with zero placed jobs --
+    # Postgres jsonb rejects NaN outright (it's not valid JSON), so swap to
+    # None ("no data for this class") before it ever reaches persistence.
+    mean_delay_days = {k: (None if pd.isna(v) else v) for k, v in mean_delay_days.items()}
+    mean_wait_days = {k: (None if pd.isna(v) else v) for k, v in mean_wait_days.items()}
 
     metrics = {
         "line_blocked_min": _line_blocked_min(possessions_df),

@@ -27,10 +27,13 @@ NUMERIC_METRICS = ["jobs_unscheduled", "n_possessions", "line_blocked_min", "wei
 OUTPUT_CSV = "outputs/run_comparison.csv"
 
 
-def _weighted_wait(mean_wait_days: dict) -> float:
+def _weighted_wait(mean_wait_days: dict) -> float | None:
     """Single fairness score: true PRIORITY_WEIGHTS applied to each
     priority class's mean wait -- lower is better, comparable across
-    approaches regardless of which weight scheme produced the schedule."""
+    approaches regardless of which weight scheme produced the schedule.
+    None (not a partial sum) if any class has no placed jobs to average."""
+    if any(mean_wait_days[cls] is None for cls in PRIORITY_ORDER):
+        return None
     return sum(PRIORITY_WEIGHTS[cls] * mean_wait_days[cls] for cls in PRIORITY_ORDER)
 
 
