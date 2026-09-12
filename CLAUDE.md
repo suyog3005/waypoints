@@ -758,3 +758,61 @@ never concurrent, per the existing rule — plus 3 baselines at well under
   out of both `/comparison` and the new `/summary`, avoiding duplicating
   that logic across the two endpoints.
 - Local `pytest`: 13/13 still passing.
+
+## Pre-demo bug pass
+
+**Real bug found and fixed, not just theoretical**: a priority class with
+zero placed jobs makes `.reindex(order)` in `_compute_metrics` (both
+`baseline.py` and `solver.py`) produce `NaN` for that class in
+`mean_delay_days`/`mean_wait_days` — same for solver.py's early-exit
+branch (no feasible solution found at all: previously hardcoded
+`float("nan")` for every class). Postgres `jsonb` rejects `NaN` outright
+(not valid JSON syntax), so `save_result` threw a raw
+`psycopg2.errors.InvalidTextRepresentation`, leaving the run `failed` with
+an ugly SQL traceback as `error_message` instead of a clean status.
+**Reproduced live**: `POST` a `solver_gt` run with `solve_time_limit: 0.01`
+on a tiny scenario → `UNKNOWN` status, all-NaN metrics, confirmed 500-style
+failure via the real API before the fix.
+
+Fix: both files now convert NaN -> `None` right after the `reindex` (via
+`pd.isna`), and solver.py's early-exit branch sets `None` directly instead
+of `float("nan")`. This has two knock-on fixes, both real, both caught by
+re-testing rather than assumed safe: `_weighted_wait` (duplicated in
+`api/services/solve_runner.py` and `scripts/run.py`) multiplied
+`mean_wait_days[cls]` directly — `None * int` raises `TypeError` where
+`NaN * int` used to silently propagate, so it now returns `None` for the
+whole score if *any* class is `None`, rather than crash or silently treat
+a missing class as zero (which would understate the score). And
+`transform.py::_pct_diff` did `value - baseline_value`, which raises on
+`None` the same way — now short-circuits to `None` whenever either side is
+`None`, not just when `baseline_value` is falsy/NaN.
+
+**Verified end-to-end after the fix**: the exact same previously-failing
+request (`solver_gt`, `solve_time_limit: 0.01`) now returns
+`status: complete`, `metrics` with `null` in place of every missing value,
+and `GET /scenarios/{id}/comparison` against it returns `null` for the
+undefined percentage diffs while still computing the real ones (e.g.
+`n_possessions: -100.0`) -- no crash anywhere in the chain.
+
+**Also pinned `requirements.txt` and `api/requirements.txt`** to the exact
+versions already verified running in the container (previously
+unpinned) — a `--no-cache` rebuild on presentation day could otherwise
+have silently pulled newer, untested releases of `pandas`/`ortools`/
+`fastapi`/etc. Verified the pinned set still resolves and builds cleanly
+(`docker compose build --no-cache api`).
+
+**Full fresh-machine simulation**, to catch anything that only breaks on
+a clean checkout: built and ran an isolated `docker compose -p
+bp_freshtest` stack (separate network/volume, same ports, main stack
+stopped first to free them) from scratch — confirmed `GET /scenarios`
+correctly 500s before migrations are applied (expected, not a bug; already
+documented in the runbook), `alembic upgrade head` applies both migrations
+cleanly in order on an empty database, and `python -m scripts.seed_demo`
+reproduces all 9 demo runs with 0 validation violations. Torn down after
+verification; the main stack's own data (and its `bugcheck-tiny` scratch
+scenario created while reproducing the NaN bug, deleted afterward) was
+untouched throughout since it lives in a separate named volume.
+
+Local `pytest`: 13/13 passing after every change in this pass. No other
+bugs found in this review — `pyflakes` across `src/`, `api/`, `scripts/`,
+`tests/` reported nothing (no unused imports, no undefined names).
